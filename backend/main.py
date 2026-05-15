@@ -1543,6 +1543,26 @@ def _date_overlaps_day(start: Any, end: Any, selected_date: date) -> bool:
     return start_d <= selected_date <= end_d
 
 
+@app.get("/health")
+def health_check():
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.execute("SELECT 1")
+        conn.close()
+        db_status = "ok"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+
+    uploads_ok = UPLOADS_DIR.is_dir()
+
+    return {
+        "status": "ok" if db_status == "ok" and uploads_ok else "degraded",
+        "timestamp": datetime.utcnow().isoformat(),
+        "database": db_status,
+        "uploads_folder": "ok" if uploads_ok else "missing",
+    }
+
+
 @app.get("/openapi.json")
 def admin_openapi(request: Request):
     _require_admin(request)
