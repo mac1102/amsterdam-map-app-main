@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=2" />
+  <link rel="stylesheet" href="/static/admin.css?v=3" />
+</head>
+<body>
+  <div class="admin-shell">
+    <!-- Sidebar -->
+    <aside class="admin-sidebar flex-shrink-0">
+      <div class="sidebar-header border-b">
+        <div class="sidebar-title-row flex items-center gap-2 mb-4">
+          <a href="/" class="back-link text-gray-500 hover:text-black" title="Back to Home">
+            <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="20" height="20"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          </a>
+          <h1 class="admin-title">Admin</h1>
+        </div>
+        
+        <div class="sidebar-tabs flex space-x-1 bg-gray-100 p-1 rounded-lg">
+          <button id="tabDashboard" class="sidebar-tab flex-1 flex items-center justify-center gap-2 py-1.5 text-sm font-medium rounded-md active">
+             <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+             Dashboard
+          </button>
+          <button id="tabApplications" class="sidebar-tab flex-1 flex items-center justify-center gap-2 py-1.5 text-sm font-medium rounded-md">
+            <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            Applications
+          </button>
+          <button id="tabTbgn" class="sidebar-tab flex-1 flex items-center justify-center gap-2 py-1.5 text-sm font-medium rounded-md">
+            <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path d="M3 12h18"></path><path d="M7 5v14"></path><path d="M17 5v14"></path><path d="M5 7h4"></path><path d="M15 17h4"></path></svg>
+            TBGN
+          </button>
+        </div>
+      </div>
+
+      <!-- Application Tab Content -->
+      <div id="sidebarApplications" class="sidebar-content hidden">
+        <div class="filters p-4 pb-2">
+          <select id="statusFilter" class="admin-input">
+            <option value="">All statuses</option>
+            <option value="submitted">Submitted</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <input id="emailFilter" type="text" placeholder="Filter by email" class="admin-input" />
+          <button id="refreshBtn" type="button" class="btn-black">Refresh</button>
+        </div>
+        <div id="appList" class="app-list flex-1 overflow-y-auto px-4 pb-4 space-y-3 mt-2"></div>
+      </div>
+
+      <!-- TBGN Tab Content -->
+      <div id="sidebarTbgn" class="sidebar-content hidden">
+        <div class="filters p-4 pb-2">
+          <button id="newTbgnBtn" type="button" class="btn-black">New TBGN</button>
+          <button id="refreshTbgnBtn" type="button" class="admin-input" style="cursor: pointer; background: white;">Refresh TBGN list</button>
+          <p class="text-xs text-gray-500">Temporary out-of-service projects managed separately from work applications.</p>
+        </div>
+      </div>
+
+      <!-- Dashboard Tab Content -->
+      <div id="sidebarDashboard" class="sidebar-content p-4">
+        <h3 class="status-subtitle text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">System Status</h3>
+        <div class="space-y-3">
+          <div class="status-box status-ok flex items-center gap-2 text-sm text-green-800 bg-green-50 p-3 rounded-md border border-green-200">
+            <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="16" height="16" class="text-green-600"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            All systems operational
+          </div>
+          <div class="status-box status-info flex items-center gap-2 text-sm text-blue-800 bg-blue-50 p-3 rounded-md border border-blue-200">
+            <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="16" height="16" class="text-blue-600"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            <span id="activeZonesSidebar">0</span> active work zones
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="admin-main flex-1 overflow-y-auto p-6 bg-gray-50">
+      
+      <!-- Dashboard View -->
+      <div id="viewDashboard" class="max-w-5xl mx-auto space-y-6">
+        <h2 class="text-3xl font-bold mb-6">Dashboard</h2>
+        
+        <div class="grid grid-cols-4 gap-4">
+          <div class="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+            <div class="text-gray-500 text-sm font-medium mb-1">Pending Review</div>
+            <div id="statPending" class="text-3xl font-bold text-gray-900">0</div>
+            <div class="text-xs text-blue-600 mt-2 flex items-center gap-1"><svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> Requires review</div>
+          </div>
+          <div class="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+            <div class="text-gray-500 text-sm font-medium mb-1">Approved</div>
+            <div id="statApproved" class="text-3xl font-bold text-gray-900">0</div>
+            <div class="text-xs text-green-600 mt-2 flex items-center gap-1"><svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg> Safe to work</div>
+          </div>
+          <div class="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+            <div class="text-gray-500 text-sm font-medium mb-1">Active Work Zones</div>
+            <div id="statZones" class="text-3xl font-bold text-gray-900">0</div>
+            <div class="text-xs text-gray-500 mt-2 flex items-center gap-1"><svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg> Computed from targets</div>
+          </div>
+          <div class="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+            <div class="text-gray-500 text-sm font-medium mb-1">Rejected</div>
+            <div id="statRejected" class="text-3xl font-bold text-gray-900">0</div>
+            <div class="text-xs text-red-500 mt-2 flex items-center gap-1"><svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg> Missing requirements</div>
+          </div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden mt-8">
+          <div class="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
+            <h3 class="font-bold text-lg">Recent Applications</h3>
+            <button id="viewAllBtn" class="text-sm text-blue-600 hover-underline font-medium" style="cursor: pointer; background: transparent; border: none;">View all</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm" style="text-align: left;">
+              <thead class="bg-gray-50 text-gray-500 border-b border-gray-200">
+                <tr>
+                  <th class="px-6 py-3 font-medium">ID</th>
+                  <th class="px-6 py-3 font-medium">Applicant</th>
+                  <th class="px-6 py-3 font-medium">Date Submitted</th>
+                  <th class="px-6 py-3 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody id="recentActivityList" class="divide-y divide-gray-200">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detail View -->
+      <div id="viewDetail" class="hidden">
+        <button id="adminDetailBackBtn" class="md-hidden mb-4 btn-black" style="display: none;">&larr; Back to List</button>
+        <div id="detailRoot">
+          <div class="bg-white border border-gray-200 rounded-lg p-6 max-w-5xl shadow-sm text-gray-600">
+            Select an application to view details.
+          </div>
+        </div>
+      </div>
+
+      <!-- TBGN View -->
+      <div id="viewTbgn" class="hidden max-w-6xl mx-auto space-y-6">
+        <div class="flex justify-between items-start gap-4 mb-4">
+          <div>
+            <h2 class="text-3xl font-bold mb-2">TBGN Projects</h2>
+            <p class="text-sm text-gray-500">Manage temporary tram out-of-service projects. These are informational map/timeline overlays, not bookable work targets.</p>
+          </div>
+          <button id="tbgnAddTopBtn" type="button" class="btn-black">Add TBGN</button>
+        </div>
+
+        <div id="tbgnMessage" class="hidden"></div>
+
+        <div id="tbgnFormCard" class="hidden bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+          <div class="flex justify-between items-center mb-4">
+            <h3 id="tbgnFormTitle" class="font-bold text-lg">Add TBGN</h3>
+            <button id="tbgnCancelBtn" type="button" class="text-sm text-gray-500 hover-underline" style="cursor: pointer; background: transparent; border: none;">Cancel</button>
+          </div>
+          <form id="tbgnForm" class="space-y-4">
+            <input id="tbgnId" type="hidden" />
+            <div class="grid grid-cols-2 gap-4">
+              <label class="block text-sm font-medium text-gray-700">
+                Name
+                <input id="tbgnName" type="text" class="admin-input mt-1" required />
+              </label>
+              <label class="block text-sm font-medium text-gray-700">
+                Affected lines
+                <input id="tbgnAffectedLines" type="text" class="admin-input mt-1" placeholder="13,14" />
+              </label>
+            </div>
+            <div class="grid grid-cols-3 gap-4">
+              <label class="block text-sm font-medium text-gray-700">
+                Start date
+                <input id="tbgnStartDate" type="date" class="admin-input mt-1" required />
+              </label>
+              <label class="block text-sm font-medium text-gray-700">
+                End date
+                <input id="tbgnEndDate" type="date" class="admin-input mt-1" required />
+              </label>
+              <label class="block text-sm font-medium text-gray-700">
+                Status
+                <select id="tbgnStatus" class="admin-input mt-1">
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
+                </select>
+              </label>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <label class="block text-sm font-medium text-gray-700">
+                Color
+                <input id="tbgnColor" type="color" class="admin-input mt-1" value="#7c3aed" />
+              </label>
+              <label class="block text-sm font-medium text-gray-700">
+                Notes
+                <textarea id="tbgnNotes" class="admin-input mt-1" rows="3"></textarea>
+              </label>
+            </div>
+            <div class="block text-sm font-medium text-gray-700">
+              Geometry drawing
+              <div id="tbgnDrawMap" class="tbgn-draw-map mt-1"></div>
+              <div class="flex justify-between items-center mt-2">
+                <p id="tbgnDrawStatus" class="text-xs text-gray-500">Draw one point, line, or polygon.</p>
+                <button id="tbgnClearDrawingBtn" type="button" class="admin-input" style="width: auto; cursor: pointer; background: white;">Clear all drawings</button>
+              </div>
+            </div>
+            <details class="tbgn-geometry-debug">
+              <summary class="text-sm font-medium text-gray-700 cursor-pointer">Advanced: raw GeoJSON</summary>
+              <textarea id="tbgnGeometry" class="admin-input mt-1" rows="8" placeholder='{"type":"LineString","coordinates":[[4.9,52.37],[4.91,52.38]]}'></textarea>
+            </details>
+            <div class="flex gap-2">
+              <button id="tbgnSaveBtn" type="submit" class="btn-black">Save TBGN</button>
+              <button id="tbgnResetBtn" type="button" class="admin-input" style="width: auto; cursor: pointer; background: white;">Clear form</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+          <div class="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
+            <h3 class="font-bold text-lg">All TBGN Projects</h3>
+            <button id="tbgnRefreshTopBtn" type="button" class="text-sm text-blue-600 hover-underline font-medium" style="cursor: pointer; background: transparent; border: none;">Refresh</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm" style="text-align: left;">
+              <thead class="bg-gray-50 text-gray-500 border-b border-gray-200">
+                <tr>
+                  <th class="px-6 py-3 font-medium">Name</th>
+                  <th class="px-6 py-3 font-medium">Start</th>
+                  <th class="px-6 py-3 font-medium">End</th>
+                  <th class="px-6 py-3 font-medium">Lines</th>
+                  <th class="px-6 py-3 font-medium">Status</th>
+                  <th class="px-6 py-3 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tbgnTableBody" class="divide-y divide-gray-200">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+       
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+  <script src="/static/js/admin.js"></script>
+</body>
+</html>

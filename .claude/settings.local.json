@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(file \"d:/amsterdam-map-app-main/backend/data/\"*.shp \"d:/amsterdam-map-app-main/backend/data/\"*.dbf)",
+      "Bash(python3 -c \"import json; data = json.load\\(open\\('d:/amsterdam-map-app-main/static/data/spoor_data.js'.replace\\('\\\\\\\\\\\\\\\\', '/'\\).replace\\('d:/', '/mnt/d/'\\), encoding='utf-8', errors='replace'\\)\\); print\\(f'File seems to be JavaScript wrapper'\\); print\\('Length: ', len\\(open\\('d:/amsterdam-map-app-main/static/data/spoor_data.js'.replace\\('\\\\\\\\\\\\\\\\', '/'\\).replace\\('d:/', '/mnt/d/'\\)\\).read\\(\\)\\)\\)\")"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo                        # add this - compiled Python files
+
+backend/data/uploads/
+backend/data/app.db
+backend/data/applications/
+backend/data/tiles/
+backend/data/tile_cache/
+backend/data/_tmp/
+backend/data/*.db
+backend/wior.db
+*.db
+
+echo .claude/ >> .gitignore
+
+
+__MACOSX/
+.DS_Store                    # add this - Mac system files
+
+*.pdf
+*.svg
+*.tif
+*.tiff
+
+node_modules/                # add this - in case you ever add npm
+*.log                        # add this - server logs

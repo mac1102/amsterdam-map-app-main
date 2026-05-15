@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GVB List View</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/list_view/css/list-view.css" />
+</head>
+<body class="bg-gray-100">
+  <div class="min-h-screen bg-[#f4f5f7] font-sans text-gray-900 flex flex-col relative text-base">
+    <header class="bg-[#0063D3] text-white sticky top-0 z-30 shadow-md">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="bg-white/10 p-1.5 rounded-sm">
+            <svg class="w-5 h-5" stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" x2="9" y1="3" y2="18"/><line x1="15" x2="15" y1="6" y2="21"/></svg>
+          </div>
+          <h1 class="font-bold text-lg tracking-tight">GVB Tram communication map</h1>
+        </div>
+        <a href="/" class="flex items-center gap-2 px-4 py-2 bg-white text-[#0063D3] font-bold text-sm rounded-sm hover:bg-blue-50 transition-colors shadow-sm decoration-none">
+          <svg class="w-4 h-4" stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          Back to Map
+        </a>
+      </div>
+    </header>
+
+    <main class="flex-1 max-w-4xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 pb-32">
+      <div class="mb-8">
+        <h2 class="text-3xl font-extrabold text-gray-900 mb-2 tracking-tight">List View &amp; Application</h2>
+        <p class="text-gray-600 font-medium">Select segments to apply for a work permit directly from this view.</p>
+        <div id="listViewStatus" class="text-sm mt-2 text-[#0063D3] font-bold">Loading...</div>
+      </div>
+
+      <div class="space-y-4 mb-8">
+        <div class="relative">
+          <svg class="absolute left-4 top-3.5 w-5 h-5 text-gray-400" stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="listSearch" placeholder="Search lines or segments..." class="w-full pl-12 pr-4 py-3.5 bg-white border border-gray-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-[#0063D3] focus:border-transparent font-medium text-gray-900 placeholder-gray-400 transition-shadow transition-colors" />
+        </div>
+      </div>
+
+      <div id="linesContainer" class="space-y-6"></div>
+    </main>
+
+    <div id="floatingBar" class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-bottom-bar p-4 z-40 transform transition-transform translate-y-full flex">
+      <div class="max-w-4xl mx-auto flex items-center justify-between flex-1">
+        <div class="flex items-center gap-4">
+          <div id="floatingCount" class="bg-[#0063D3] text-white w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg shadow-sm">
+            0
+          </div>
+          <div>
+            <div class="font-bold text-gray-900">Segments Selected</div>
+            <div class="text-sm text-gray-500 font-medium">Ready for permit application</div>
+          </div>
+        </div>
+        <div class="flex gap-3">
+          <button id="floatingClearBtn" class="px-4 py-3 text-gray-600 font-bold hover:bg-gray-100 rounded-md transition-colors border-0 bg-transparent cursor-pointer">
+            Clear
+          </button>
+          <button id="floatingApplyBtn" class="bg-[#E3001B] hover:bg-[#B30015] border-0 cursor-pointer text-white px-8 py-3 rounded-md font-bold transition-colors shadow-sm flex items-center gap-2">
+            Apply for Permit
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+
+  <script type="module" src="/static/list_view/js/list-view.js"></script>
+</body>
+</html>
+
