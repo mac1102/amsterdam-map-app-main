@@ -42,7 +42,15 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from backend.audit_logs import list_admin_audit_logs, list_user_activity, write_audit_log
+from backend.db_postgres import check_postgres_health
 from backend.feature_index import FeatureIndex
+from backend.postgres_app_queries import PostgresAppQueries
+from backend.postgis_queries import find_nearest_segment_postgis, is_postgis_click_available
+from backend.postgis_wior_queries import (
+    find_wior_conflicts_postgis,
+    get_postgis_wior_mirror_status,
+)
 from backend.tile_server import TileServer
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +71,43 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _app_db_backend() -> str:
+    raw = os.getenv("APP_DB_BACKEND", "sqlite").strip().lower()
+    if raw == "postgres":
+        return "postgres"
+    return "sqlite"
+
+
+def _use_postgres_read_backend() -> bool:
+    return _app_db_backend() == "postgres"
+
+
+def _audit_runtime_enabled() -> bool:
+    return _use_postgres_read_backend()
+
+
+FEATURE_FLAGGED_READ_ROUTE_PATHS = [
+    "GET /api/line_status",
+    "GET /api/my_applications",
+    "GET /api/admin/applications",
+    "GET /api/admin/applications/{application_id}",
+    "GET /api/tbgn/projects",
+    "GET /api/admin/tbgn",
+    "GET /api/admin/tbgn/{project_id}",
+    "GET /api/segment_bookings",
+    "GET /api/my_transfer_trips",
+    "GET /api/admin/transfer_trips",
+    "GET /api/admin/transfer_trips/{trip_id}",
+]
+
+
+def _postgres_read_unavailable(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail=f"PostgreSQL read backend unavailable: {exc}",
+    )
 
 
 class ProtectedStaticFiles(StaticFiles):
@@ -966,6 +1011,13 @@ def _tbgn_row_to_dict(row: sqlite3.Row, public: bool = False) -> Dict[str, Any]:
     return data
 
 def _ensure_user_exists(email: str) -> bool:
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                return bool(pg.get_user_by_email(email))
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+
     with get_db() as conn:
         row = conn.execute(
             "SELECT email FROM users WHERE lower(email) = ?",
@@ -1554,11 +1606,30 @@ def health_check():
         db_status = f"error: {str(e)}"
 
     uploads_ok = UPLOADS_DIR.is_dir()
+    postgres_status = check_postgres_health()
+    postgres_ok = postgres_status.get("status") in {"ok", "not_configured"}
+    resolved_backend = _app_db_backend()
+    raw_backend = os.getenv("APP_DB_BACKEND", "sqlite").strip() or "sqlite"
 
     return {
-        "status": "ok" if db_status == "ok" and uploads_ok else "degraded",
+        "status": "ok" if db_status == "ok" and uploads_ok and postgres_ok else "degraded",
         "timestamp": datetime.utcnow().isoformat(),
         "database": db_status,
+        "sqlite": {
+            "status": db_status,
+            "path": str(DB_PATH),
+        },
+        "app_db_backend": {
+            "raw": raw_backend,
+            "resolved": resolved_backend,
+            "selected_read_routes_backend": resolved_backend,
+            "selected_write_backend": resolved_backend,
+            "selected_read_routes": FEATURE_FLAGGED_READ_ROUTE_PATHS,
+            "postgres_configured": bool(postgres_status.get("configured")),
+            "postgres_available": postgres_status.get("status") == "ok",
+            "sqlite_status": db_status,
+        },
+        "postgres": postgres_status,
         "uploads_folder": "ok" if uploads_ok else "missing",
     }
 
@@ -1604,23 +1675,74 @@ async def login(request: Request) -> JSONResponse:
     password = str(body.get("password", "")).strip()
 
     if not email or "@" not in email:
+        if _audit_runtime_enabled():
+            write_audit_log(
+                actor_email=email or None,
+                actor_type="unknown",
+                action_scope="user_action",
+                action="login_failed",
+                entity_type="user",
+                entity_id=email or None,
+                metadata={"failure_category": "invalid_email", "attempted_email": email or None},
+                request=request,
+            )
         raise HTTPException(status_code=400, detail="Email looks invalid.")
     if not password:
+        if _audit_runtime_enabled():
+            write_audit_log(
+                actor_email=email,
+                actor_type="unknown",
+                action_scope="user_action",
+                action="login_failed",
+                entity_type="user",
+                entity_id=email,
+                metadata={"failure_category": "missing_password", "attempted_email": email},
+                request=request,
+            )
         raise HTTPException(status_code=400, detail="Password is required.")
 
     _check_login_rate_limit(request, email)
 
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT email, password_hash, is_admin FROM users WHERE lower(email) = ?",
-            (email,),
-        ).fetchone()
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                row = pg.get_user_by_email(email)
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+    else:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT email, password_hash, is_admin FROM users WHERE lower(email) = ?",
+                (email,),
+            ).fetchone()
 
     if not row:
         _record_login_failure(request, email)
+        if _audit_runtime_enabled():
+            write_audit_log(
+                actor_email=email,
+                actor_type="unknown",
+                action_scope="user_action",
+                action="login_failed",
+                entity_type="user",
+                entity_id=email,
+                metadata={"failure_category": "invalid_credentials", "attempted_email": email},
+                request=request,
+            )
         raise HTTPException(status_code=401, detail="Invalid email or password.")
     if not verify_password(password, row["password_hash"]):
         _record_login_failure(request, email)
+        if _audit_runtime_enabled():
+            write_audit_log(
+                actor_email=email,
+                actor_type="admin" if bool(row["is_admin"]) else "user",
+                action_scope="user_action",
+                action="login_failed",
+                entity_type="user",
+                entity_id=email,
+                metadata={"failure_category": "invalid_credentials", "attempted_email": email},
+                request=request,
+            )
         raise HTTPException(status_code=401, detail="Invalid email or password.")
 
     user = {
@@ -1629,6 +1751,17 @@ async def login(request: Request) -> JSONResponse:
     }
     _clear_login_failures(request, email)
     request.session["user"] = user
+    if _audit_runtime_enabled():
+        write_audit_log(
+            actor_email=email,
+            actor_type="admin" if bool(row["is_admin"]) else "user",
+            action_scope="user_action",
+            action="login_success",
+            entity_type="user",
+            entity_id=email,
+            metadata={"is_admin": bool(row["is_admin"])},
+            request=request,
+        )
     return JSONResponse({"ok": True, "user": user})
 
 
@@ -1636,6 +1769,52 @@ async def login(request: Request) -> JSONResponse:
 def logout(request: Request) -> JSONResponse:
     request.session.clear()
     return JSONResponse({"ok": True})
+
+
+@app.get("/api/settings/activity")
+def settings_activity(
+    request: Request,
+    limit: int = 50,
+    offset: int = 0,
+    action_scope: Optional[str] = None,
+) -> JSONResponse:
+    user = _require_user(request)
+    email = str(user.get("email") or "").strip().lower()
+    try:
+        items = list_user_activity(
+            actor_email=email,
+            limit=limit,
+            offset=offset,
+            action_scope=action_scope,
+        )
+    except Exception as exc:
+        raise _postgres_read_unavailable(exc)
+    return JSONResponse({"ok": True, "items": items})
+
+
+@app.get("/api/admin/audit-logs")
+def admin_audit_logs(
+    request: Request,
+    actor_email: Optional[str] = None,
+    action_scope: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> JSONResponse:
+    _require_admin(request)
+    try:
+        items = list_admin_audit_logs(
+            actor_email=actor_email,
+            action_scope=action_scope,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        raise _postgres_read_unavailable(exc)
+    return JSONResponse({"ok": True, "items": items})
 
 class WiorConflictTarget(BaseModel):
     segment_id: str
@@ -1649,6 +1828,131 @@ class WiorConflictTarget(BaseModel):
 
 class WiorConflictCheckRequest(BaseModel):
     targets: List[WiorConflictTarget]
+
+
+def _legacy_wior_conflicts(targets: List[WiorConflictTarget]) -> List[Dict[str, Any]]:
+    wior_rows = get_cached_wior_serving_features(limit=5000, mode="all")
+
+    conflicts: List[Dict[str, Any]] = []
+
+    for target_index, target in enumerate(targets):
+        if target.target_type and _normalize_application_target_type(target.target_type) == "overhead_section":
+            continue
+        segment_id = str(target.segment_id or "").strip()
+        project_start = _parse_iso_datetime_safe(target.project_start)
+        project_end = _parse_iso_datetime_safe(target.project_end)
+        resolved_target_index = target.target_index if target.target_index is not None else target_index
+        resolved_schedule_index = target.schedule_index if target.schedule_index is not None else 0
+        resolved_schedule_label = str(target.schedule_label or "").strip() or "Custom work"
+
+        if not segment_id or not project_start or not project_end:
+            continue
+
+        for wior in wior_rows:
+            segment_ids = wior.get("segment_ids") or []
+            if segment_id not in segment_ids:
+                continue
+
+            wior_start = _parse_iso_date_safe(wior.get("start_date"))
+            wior_end = _parse_iso_date_safe(wior.get("end_date"))
+
+            if not _ranges_overlap(project_start, project_end, wior_start, wior_end):
+                continue
+
+            conflicts.append(
+                {
+                    "target_index": resolved_target_index,
+                    "schedule_index": resolved_schedule_index,
+                    "schedule_label": resolved_schedule_label,
+                    "matched_segment_id": segment_id,
+                    "project_start": target.project_start,
+                    "project_end": target.project_end,
+                    "wior_id": wior.get("wior_id"),
+                    "project_code": wior.get("project_code"),
+                    "project_name": wior.get("project_name"),
+                    "status": wior.get("status"),
+                    "work_type": wior.get("work_type"),
+                    "start_date": wior.get("start_date"),
+                    "end_date": wior.get("end_date"),
+                }
+            )
+    return conflicts
+
+
+def _wior_conflict_response(
+    conflicts: List[Dict[str, Any]],
+    backend: str = "legacy",
+    include_backend: bool = False,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload = {
+        "ok": True,
+        "has_conflicts": len(conflicts) > 0,
+        "conflict_count": len(conflicts),
+        "conflicts": conflicts,
+    }
+    if include_backend:
+        payload["backend"] = backend
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _postgis_wior_mirror_debug(status: Dict[str, Any]) -> Dict[str, Any]:
+    safe_keys = (
+        "database_url_set",
+        "reachable",
+        "wior_table_exists",
+        "tram_segments_table_exists",
+        "row_count",
+        "latest_updated_at",
+        "latest_last_built_at",
+        "available",
+        "reason",
+        "error_type",
+    )
+    return {key: status.get(key) for key in safe_keys if key in status}
+
+
+def _audit_wior_conflict_check(
+    request: Request,
+    actor_email: str,
+    backend_used: str,
+    target_count: int,
+    conflict_count: int,
+    fallback_used: bool = False,
+    fallback_reason: Optional[str] = None,
+) -> None:
+    if not _audit_runtime_enabled():
+        return
+    metadata = {
+        "backend": backend_used,
+        "fallback_used": bool(fallback_used),
+        "conflict_count": int(conflict_count or 0),
+        "target_count": int(target_count or 0),
+    }
+    if fallback_reason:
+        metadata["fallback_reason"] = fallback_reason
+    write_audit_log(
+        actor_email=actor_email,
+        actor_type="user",
+        action_scope="system_action",
+        action="wior_conflict_checked",
+        entity_type="wior_conflict_check",
+        metadata=metadata,
+        request=request,
+    )
+    if fallback_used:
+        write_audit_log(
+            actor_email=actor_email,
+            actor_type="user",
+            action_scope="system_action",
+            action="wior_postgis_fallback_to_legacy",
+            entity_type="wior_conflict_check",
+            metadata=metadata,
+            request=request,
+        )
+
 
 #----------------------ADMIN_FEATURES----------------
 @app.get("/admin")
@@ -1694,19 +1998,134 @@ def tile(z: int, x: int, y: int, request: Request) -> Response:
 
 
 
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _payload_float(payload: Dict[str, Any], key: str) -> Optional[float]:
+    if key not in payload:
+        return None
+    try:
+        value = float(payload[key])
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+def _valid_lng_lat(lng: Optional[float], lat: Optional[float]) -> bool:
+    return (
+        lng is not None
+        and lat is not None
+        and -180 <= lng <= 180
+        and -90 <= lat <= 90
+    )
+
+
+def _valid_pixel_xy(x: Optional[float], y: Optional[float]) -> bool:
+    return x is not None and y is not None
+
+
+def _click_radius_m(payload: Dict[str, Any]) -> float:
+    if "radius_m" not in payload:
+        return 30.0
+    try:
+        radius_m = float(payload["radius_m"])
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="radius_m must be numeric")
+    if not math.isfinite(radius_m) or radius_m <= 0:
+        raise HTTPException(status_code=400, detail="radius_m must be positive")
+    return min(radius_m, 250.0)
+
+
+def _pixel_click_result(x: float, y: float) -> Dict[str, Any]:
+    result = feature_index.hit_test(x=x, y=y)
+    result["map_px"] = {"x": x, "y": y}
+    result["timestamp"] = _utc_timestamp()
+    return result
+
+
+def _postgis_no_hit_result(radius_m: float, reason: str) -> Dict[str, Any]:
+    return {
+        "hit": False,
+        "hit_type": None,
+        "feature": None,
+        "debug": {
+            "mode": "postgis_lnglat",
+            "radius_m": radius_m,
+            "reason": reason,
+        },
+        "map_px": None,
+        "timestamp": _utc_timestamp(),
+    }
+
+
+def _postgis_click_result(segment: Dict[str, Any], radius_m: float) -> Dict[str, Any]:
+    distance_m = segment.get("distance_m")
+    segment_id = segment.get("segment_id")
+    return {
+        "hit": True,
+        "hit_type": "segment",
+        "feature": {
+            "id": segment_id,
+            "segment_id": segment_id,
+            "line_id": segment.get("line_id"),
+            "line_name": segment.get("line_name"),
+            "source": segment.get("source"),
+            "bookable": segment.get("bookable"),
+            "distance_m": distance_m,
+            "geometry": segment.get("geometry"),
+        },
+        "debug": {
+            "mode": "postgis_lnglat",
+            "radius_m": radius_m,
+            "distance_m": distance_m,
+        },
+        "map_px": None,
+        "timestamp": _utc_timestamp(),
+    }
+
+
+def _postgis_unavailable_reason() -> str:
+    if is_postgis_click_available():
+        return "no_segment_within_radius"
+    return "postgis_unavailable"
+
+
 @app.post("/api/click")
 async def click(payload: Dict[str, Any], request: Request) -> JSONResponse:
     _require_user(request)
-    try:
-        x = float(payload["x"])
-        y = float(payload["y"])
-    except Exception:
-        raise HTTPException(status_code=400, detail="Payload must include numeric x,y")
+    lng = _payload_float(payload, "lng")
+    lat = _payload_float(payload, "lat")
+    x = _payload_float(payload, "x")
+    y = _payload_float(payload, "y")
+    has_lng_lat = _valid_lng_lat(lng, lat)
+    has_pixel_xy = _valid_pixel_xy(x, y)
 
-    result = feature_index.hit_test(x=x, y=y)
-    result["map_px"] = {"x": x, "y": y}
-    result["timestamp"] = datetime.now(timezone.utc).isoformat()
-    return JSONResponse(result)
+    if has_lng_lat:
+        radius_m = _click_radius_m(payload)
+        try:
+            segment = find_nearest_segment_postgis(lng, lat, radius_m=radius_m)
+        except Exception:
+            segment = None
+
+        if segment is not None:
+            return JSONResponse(_postgis_click_result(segment, radius_m))
+        if has_pixel_xy:
+            return JSONResponse(_pixel_click_result(x, y))
+
+        reason = _postgis_unavailable_reason()
+        return JSONResponse(_postgis_no_hit_result(radius_m, reason))
+
+    if "lng" in payload or "lat" in payload:
+        if not has_pixel_xy:
+            raise HTTPException(status_code=400, detail="Payload must include valid lng,lat or numeric x,y")
+
+    if has_pixel_xy:
+        return JSONResponse(_pixel_click_result(x, y))
+
+    raise HTTPException(status_code=400, detail="Payload must include valid lng,lat or numeric x,y")
 
 # -------------------- WIOR data pipeline --------------------
 @app.post("/api/wior/refresh")
@@ -1765,67 +2184,192 @@ def api_wior_features(request: Request, limit: int = 1000, mode: str = "active")
 def api_wior_conflicts_check(
     payload: WiorConflictCheckRequest,
     request: Request,
+    backend: str = "auto",
 ) -> JSONResponse:
-    _require_user(request)
+    user = _require_user(request)
+    actor_email = str(user.get("email") or "").strip().lower()
 
     targets = payload.targets or []
     if not targets:
         raise HTTPException(status_code=400, detail="At least one target is required.")
 
-    wior_rows = get_cached_wior_serving_features(limit=5000, mode="all")
+    resolved_backend = str(backend or "auto").strip().lower()
+    if resolved_backend not in {"auto", "legacy", "postgis", "compare"}:
+        raise HTTPException(status_code=400, detail="backend must be auto, legacy, postgis, or compare.")
 
-    conflicts: List[Dict[str, Any]] = []
+    if resolved_backend == "legacy":
+        legacy_conflicts = _legacy_wior_conflicts(targets)
+        response_payload = _wior_conflict_response(legacy_conflicts, backend="legacy")
+        _audit_wior_conflict_check(
+            request,
+            actor_email,
+            backend_used="legacy",
+            target_count=len(targets),
+            conflict_count=len(legacy_conflicts),
+        )
+        return JSONResponse(response_payload)
 
-    for target_index, target in enumerate(targets):
-        if target.target_type and _normalize_application_target_type(target.target_type) == "overhead_section":
-            continue
-        segment_id = str(target.segment_id or "").strip()
-        project_start = _parse_iso_datetime_safe(target.project_start)
-        project_end = _parse_iso_datetime_safe(target.project_end)
-        resolved_target_index = target.target_index if target.target_index is not None else target_index
-        resolved_schedule_index = target.schedule_index if target.schedule_index is not None else 0
-        resolved_schedule_label = str(target.schedule_label or "").strip() or "Custom work"
+    postgis_status = get_postgis_wior_mirror_status()
+    postgis_debug = _postgis_wior_mirror_debug(postgis_status)
+    postgis_available = bool(postgis_status.get("available"))
+    postgis_unavailable_reason = str(postgis_status.get("reason") or "postgis_unavailable")
 
-        if not segment_id or not project_start or not project_end:
-            continue
-
-        for wior in wior_rows:
-            segment_ids = wior.get("segment_ids") or []
-            if segment_id not in segment_ids:
-                continue
-
-            wior_start = _parse_iso_date_safe(wior.get("start_date"))
-            wior_end = _parse_iso_date_safe(wior.get("end_date"))
-
-            if not _ranges_overlap(project_start, project_end, wior_start, wior_end):
-                continue
-
-            conflicts.append(
-                {
-                    "target_index": resolved_target_index,
-                    "schedule_index": resolved_schedule_index,
-                    "schedule_label": resolved_schedule_label,
-                    "matched_segment_id": segment_id,
-                    "project_start": target.project_start,
-                    "project_end": target.project_end,
-                    "wior_id": wior.get("wior_id"),
-                    "project_code": wior.get("project_code"),
-                    "project_name": wior.get("project_name"),
-                    "status": wior.get("status"),
-                    "work_type": wior.get("work_type"),
-                    "start_date": wior.get("start_date"),
-                    "end_date": wior.get("end_date"),
-                }
+    if resolved_backend == "postgis":
+        if not postgis_available:
+            raise HTTPException(
+                status_code=503,
+                detail=f"PostGIS WIOR conflict backend unavailable: {postgis_unavailable_reason}",
             )
+        try:
+            postgis_conflicts = find_wior_conflicts_postgis(targets, buffer_m=10.0)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"PostGIS WIOR conflict backend unavailable: {exc}")
+        response_payload = _wior_conflict_response(
+            postgis_conflicts,
+            backend="postgis",
+            include_backend=True,
+            extra={
+                "fallback_used": False,
+                "postgis_mirror": postgis_debug,
+            },
+        )
+        _audit_wior_conflict_check(
+            request,
+            actor_email,
+            backend_used="postgis",
+            target_count=len(targets),
+            conflict_count=len(postgis_conflicts),
+        )
+        return JSONResponse(response_payload)
 
-    return JSONResponse(
-        {
+    if resolved_backend == "auto":
+        if postgis_available:
+            try:
+                postgis_conflicts = find_wior_conflicts_postgis(targets, buffer_m=10.0)
+                response_payload = _wior_conflict_response(
+                    postgis_conflicts,
+                    backend="postgis",
+                    include_backend=True,
+                    extra={
+                        "fallback_used": False,
+                        "postgis_mirror": postgis_debug,
+                    },
+                )
+                _audit_wior_conflict_check(
+                    request,
+                    actor_email,
+                    backend_used="postgis",
+                    target_count=len(targets),
+                    conflict_count=len(postgis_conflicts),
+                )
+                return JSONResponse(response_payload)
+            except Exception as exc:
+                postgis_unavailable_reason = "postgis_error"
+                postgis_debug = {
+                    **postgis_debug,
+                    "available": False,
+                    "reason": postgis_unavailable_reason,
+                    "error_type": type(exc).__name__,
+                }
+
+        legacy_conflicts = _legacy_wior_conflicts(targets)
+        response_payload = _wior_conflict_response(
+            legacy_conflicts,
+            backend="legacy",
+            include_backend=True,
+            extra={
+                "fallback_used": True,
+                "fallback_reason": postgis_unavailable_reason,
+                "postgis_mirror": postgis_debug,
+            },
+        )
+        _audit_wior_conflict_check(
+            request,
+            actor_email,
+            backend_used="legacy",
+            target_count=len(targets),
+            conflict_count=len(legacy_conflicts),
+            fallback_used=True,
+            fallback_reason=postgis_unavailable_reason,
+        )
+        return JSONResponse(response_payload)
+
+    legacy_conflicts = _legacy_wior_conflicts(targets)
+    if not postgis_available:
+        response_payload = {
             "ok": True,
-            "has_conflicts": len(conflicts) > 0,
-            "conflict_count": len(conflicts),
-            "conflicts": conflicts,
+            "backend": "compare",
+            "postgis_available": False,
+            "postgis_mirror": postgis_debug,
+            "legacy": _wior_conflict_response(legacy_conflicts, backend="legacy", include_backend=True),
+            "postgis": {
+                "ok": False,
+                "backend": "postgis",
+                "error": postgis_unavailable_reason,
+            },
         }
+        _audit_wior_conflict_check(
+            request,
+            actor_email,
+            backend_used="compare",
+            target_count=len(targets),
+            conflict_count=len(legacy_conflicts),
+        )
+        return JSONResponse(response_payload)
+
+    try:
+        postgis_conflicts = find_wior_conflicts_postgis(targets, buffer_m=10.0)
+    except Exception as exc:
+        response_payload = {
+            "ok": True,
+            "backend": "compare",
+            "postgis_available": True,
+            "postgis_mirror": postgis_debug,
+            "legacy": _wior_conflict_response(legacy_conflicts, backend="legacy", include_backend=True),
+            "postgis": {
+                "ok": False,
+                "backend": "postgis",
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
+        }
+        _audit_wior_conflict_check(
+            request,
+            actor_email,
+            backend_used="compare",
+            target_count=len(targets),
+            conflict_count=len(legacy_conflicts),
+        )
+        return JSONResponse(response_payload)
+
+    legacy_refs = {
+        (item.get("wior_id"), item.get("matched_segment_id"))
+        for item in legacy_conflicts
+    }
+    postgis_refs = {
+        (item.get("wior_id"), item.get("matched_segment_id"))
+        for item in postgis_conflicts
+    }
+    response_payload = {
+        "ok": True,
+        "backend": "compare",
+        "postgis_available": True,
+        "postgis_mirror": postgis_debug,
+        "legacy": _wior_conflict_response(legacy_conflicts, backend="legacy", include_backend=True),
+        "postgis": _wior_conflict_response(postgis_conflicts, backend="postgis", include_backend=True),
+        "differences": {
+            "legacy_only": sorted(list(legacy_refs - postgis_refs)),
+            "postgis_only": sorted(list(postgis_refs - legacy_refs)),
+        },
+    }
+    _audit_wior_conflict_check(
+        request,
+        actor_email,
+        backend_used="compare",
+        target_count=len(targets),
+        conflict_count=len(legacy_conflicts) + len(postgis_conflicts),
     )
+    return JSONResponse(response_payload)
 
 
 @app.get("/api/wior/status")
@@ -2138,19 +2682,23 @@ def line_status(request: Request, line_id: str) -> JSONResponse:
     email = str(user.get("email") or "").strip().lower()
 
     try:
-        with get_db() as conn:
-            rows = conn.execute(
-                """
-                SELECT a.application_id, a.submitted_at, a.status,
-                       t.line_id, t.line_name, t.project_start, t.project_end, t.segment_id
-                FROM applications a
-                JOIN application_targets t ON t.application_id = a.application_id
-                WHERE lower(a.submitted_by_email) = ? AND ifnull(t.line_id, '') = ?
-                ORDER BY a.submitted_at DESC
-                """,
-                (email, line_id),
-            ).fetchall()
-    except sqlite3.Error:
+        if _use_postgres_read_backend():
+            with PostgresAppQueries() as pg:
+                rows = pg.list_line_status_applications(email, line_id)
+        else:
+            with get_db() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT a.application_id, a.submitted_at, a.status,
+                           t.line_id, t.line_name, t.project_start, t.project_end, t.segment_id
+                    FROM applications a
+                    JOIN application_targets t ON t.application_id = a.application_id
+                    WHERE lower(a.submitted_by_email) = ? AND ifnull(t.line_id, '') = ?
+                    ORDER BY a.submitted_at DESC
+                    """,
+                    (email, line_id),
+                ).fetchall()
+    except Exception:
         return JSONResponse(
             {
                 "line_id": line_id,
@@ -2201,7 +2749,14 @@ def line_status(request: Request, line_id: str) -> JSONResponse:
 def my_applications(request: Request) -> JSONResponse:
     user = _require_user(request)
     email = str(user.get("email") or "").strip().lower()
-    apps = _apps_for_email(email)
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                apps = pg.list_applications_for_email(email)
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+    else:
+        apps = _apps_for_email(email)
 
     out: List[Dict[str, Any]] = []
     for a in apps:
@@ -2229,6 +2784,18 @@ def my_applications(request: Request) -> JSONResponse:
 def api_list_tbgn_projects(request: Request) -> JSONResponse:
     _require_user(request)
 
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                projects = pg.list_tbgn_projects(
+                    limit=1000,
+                    public=True,
+                    published_only=True,
+                )
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        return JSONResponse({"ok": True, "projects": projects})
+
     with get_db() as conn:
         rows = conn.execute(
             """
@@ -2251,6 +2818,14 @@ def api_list_tbgn_projects(request: Request) -> JSONResponse:
 def admin_list_tbgn_projects(request: Request) -> JSONResponse:
     _require_admin(request)
 
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                projects = pg.list_tbgn_projects(limit=1000)
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        return JSONResponse({"ok": True, "projects": projects})
+
     with get_db() as conn:
         rows = conn.execute(
             """
@@ -2271,6 +2846,16 @@ def admin_list_tbgn_projects(request: Request) -> JSONResponse:
 @app.get("/api/admin/tbgn/{project_id}")
 def admin_get_tbgn_project(project_id: str, request: Request) -> JSONResponse:
     _require_admin(request)
+
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                project = pg.get_tbgn_project(project_id)
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        if not project:
+            raise HTTPException(status_code=404, detail="TBGN project not found.")
+        return JSONResponse({"ok": True, "project": project})
 
     with get_db() as conn:
         row = conn.execute(
@@ -2299,6 +2884,31 @@ async def admin_create_tbgn_project(request: Request) -> JSONResponse:
     project_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     created_by = str(user.get("email") or "").strip().lower()
+
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                project = pg.create_tbgn_project(
+                    project_id=project_id,
+                    payload=payload,
+                    created_by=created_by,
+                    created_at=now,
+                )
+                write_audit_log(
+                    actor_email=created_by,
+                    actor_type="admin",
+                    action_scope="admin_action",
+                    action="tbgn_project_created",
+                    entity_type="tbgn_project",
+                    entity_id=project_id,
+                    new_value={"status": project.get("status"), "name": project.get("name")},
+                    metadata={"project_id": project_id},
+                    request=request,
+                    conn=pg._conn(),
+                )
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        return JSONResponse({"ok": True, "project": project})
 
     with get_db() as conn:
         conn.execute(
@@ -2334,7 +2944,7 @@ async def admin_create_tbgn_project(request: Request) -> JSONResponse:
 
 @app.put("/api/admin/tbgn/{project_id}")
 async def admin_update_tbgn_project(project_id: str, request: Request) -> JSONResponse:
-    _require_admin(request)
+    user = _require_admin(request)
     try:
         body = await request.json()
     except Exception:
@@ -2342,6 +2952,38 @@ async def admin_update_tbgn_project(project_id: str, request: Request) -> JSONRe
 
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                with pg._conn().transaction():
+                    existing = pg.get_tbgn_project(project_id)
+                    if not existing:
+                        raise HTTPException(status_code=404, detail="TBGN project not found.")
+                    payload = _validate_tbgn_payload(body, existing=existing)
+                    now = datetime.now(timezone.utc).isoformat()
+                    project = pg.update_tbgn_project(project_id, payload=payload, updated_at=now)
+                    if project:
+                        write_audit_log(
+                            actor_email=str(user.get("email") or "").strip().lower(),
+                            actor_type="admin",
+                            action_scope="admin_action",
+                            action="tbgn_project_updated",
+                            entity_type="tbgn_project",
+                            entity_id=project_id,
+                            old_value={"status": existing.get("status"), "name": existing.get("name")},
+                            new_value={"status": project.get("status"), "name": project.get("name")},
+                            metadata={"project_id": project_id},
+                            request=request,
+                            conn=pg._conn(),
+                        )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        if not project:
+            raise HTTPException(status_code=404, detail="TBGN project not found.")
+        return JSONResponse({"ok": True, "project": project})
 
     with get_db() as conn:
         existing = conn.execute(
@@ -2392,7 +3034,36 @@ async def admin_update_tbgn_project(project_id: str, request: Request) -> JSONRe
 
 @app.delete("/api/admin/tbgn/{project_id}")
 async def admin_delete_tbgn_project(project_id: str, request: Request) -> JSONResponse:
-    _require_admin(request)
+    user = _require_admin(request)
+
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                with pg._conn().transaction():
+                    existing = pg.get_tbgn_project(project_id)
+                    if not existing:
+                        raise HTTPException(status_code=404, detail="TBGN project not found.")
+                    deleted = pg.delete_tbgn_project(project_id)
+                    if deleted:
+                        write_audit_log(
+                            actor_email=str(user.get("email") or "").strip().lower(),
+                            actor_type="admin",
+                            action_scope="admin_action",
+                            action="tbgn_project_deleted",
+                            entity_type="tbgn_project",
+                            entity_id=project_id,
+                            old_value={"status": existing.get("status"), "name": existing.get("name")},
+                            metadata={"deleted_entity_id": project_id},
+                            request=request,
+                            conn=pg._conn(),
+                        )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="TBGN project not found.")
+        return JSONResponse({"ok": True, "id": project_id})
 
     with get_db() as conn:
         row = conn.execute(
@@ -2418,6 +3089,18 @@ def admin_list_applications(
     email: Optional[str] = None,
 ) -> JSONResponse:
     _require_admin(request)
+
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                applications = pg.list_applications(
+                    status=status,
+                    email=email,
+                    limit=1000,
+                )
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        return JSONResponse({"applications": applications})
 
     query = """
         SELECT *
@@ -2450,6 +3133,16 @@ def admin_list_applications(
 def admin_get_application(application_id: str, request: Request) -> JSONResponse:
     _require_admin(request)
 
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                data = pg.get_application_detail(application_id)
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        if not data:
+            raise HTTPException(status_code=404, detail="Application not found.")
+        return JSONResponse(data)
+
     with get_db() as conn:
         row = conn.execute(
             "SELECT * FROM applications WHERE application_id = ?",
@@ -2466,7 +3159,7 @@ def admin_get_application(application_id: str, request: Request) -> JSONResponse
 
 @app.post("/api/admin/applications/{application_id}/status")
 async def admin_update_application_status(application_id: str, request: Request) -> JSONResponse:
-    _require_admin(request)
+    user = _require_admin(request)
 
     body = await request.json()
     new_status = str(body.get("status") or "").strip().lower()
@@ -2481,6 +3174,49 @@ async def admin_update_application_status(application_id: str, request: Request)
     # when reset to submitted, clear the user-facing decision message
     if new_status == "submitted":
         decision_message = ""
+
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                with pg._conn().transaction():
+                    existing = pg.get_application_detail(application_id)
+                    if not existing:
+                        raise HTTPException(status_code=404, detail="Application not found.")
+                    updated = pg.update_application_status(
+                        application_id=application_id,
+                        status=new_status,
+                        admin_note=admin_note,
+                        decision_message=decision_message,
+                    )
+                    if updated:
+                        write_audit_log(
+                            actor_email=str(user.get("email") or "").strip().lower(),
+                            actor_type="admin",
+                            action_scope="admin_action",
+                            action="application_status_changed",
+                            entity_type="application",
+                            entity_id=application_id,
+                            old_value={"status": existing.get("status")},
+                            new_value={"status": new_status},
+                            metadata={"application_id": application_id},
+                            request=request,
+                            conn=pg._conn(),
+                        )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Application not found.")
+        return JSONResponse(
+            {
+                "ok": True,
+                "application_id": application_id,
+                "status": new_status,
+                "admin_note": admin_note,
+                "decision_message": decision_message,
+            }
+        )
 
     with get_db() as conn:
         row = conn.execute(
@@ -2526,7 +3262,44 @@ def admin_download_upload(stored_filename: str, request: Request) -> FileRespons
 
 @app.delete("/api/admin/applications/{application_id}")
 async def admin_delete_application(application_id: str, request: Request) -> JSONResponse:
-    _require_admin(request)
+    user = _require_admin(request)
+
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                with pg._conn().transaction():
+                    existing = pg.get_application_detail(application_id)
+                    if not existing:
+                        raise HTTPException(status_code=404, detail="Application not found.")
+                    uploads = pg.get_application_upload_filenames(application_id)
+                    deleted = pg.delete_application(application_id)
+                    if deleted:
+                        write_audit_log(
+                            actor_email=str(user.get("email") or "").strip().lower(),
+                            actor_type="admin",
+                            action_scope="admin_action",
+                            action="application_deleted",
+                            entity_type="application",
+                            entity_id=application_id,
+                            old_value={"status": existing.get("status")},
+                            metadata={"deleted_entity_id": application_id, "upload_count": len(uploads)},
+                            request=request,
+                            conn=pg._conn(),
+                        )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Application not found.")
+
+        for stored_filename in uploads:
+            file_path = UPLOADS_DIR / Path(stored_filename).name
+            if file_path.exists():
+                file_path.unlink()
+
+        return JSONResponse({"ok": True, "deleted": application_id})
 
     with get_db() as conn:
         row = conn.execute(
@@ -2761,41 +3534,92 @@ async def apply_for_project(
                 if not str(person.get(key) or "").strip():
                     raise HTTPException(status_code=400, detail=f"Target {idx + 1} person missing {key}.")
 
-    with get_db() as conn:
-        for idx, target in enumerate(validated_targets):
-            target_type = target["target_type"]
-            asset_id = target["asset_id"]
-            if not asset_id:
-                continue
+    if person_mode == "single":
+        people_records = [
+            {
+                "target_index": None,
+                "first_name": str(shared_person.get("first_name") or "").strip(),
+                "last_name": str(shared_person.get("last_name") or "").strip(),
+                "phone": str(shared_person.get("phone") or "").strip(),
+                "email": str(shared_person.get("email") or "").strip(),
+                "employee_id": str(shared_person.get("employee_id") or "").strip() or None,
+            }
+        ]
+    else:
+        people_records = [
+            {
+                "target_index": idx,
+                "first_name": str(person.get("first_name") or "").strip(),
+                "last_name": str(person.get("last_name") or "").strip(),
+                "phone": str(person.get("phone") or "").strip(),
+                "email": str(person.get("email") or "").strip(),
+                "employee_id": str(person.get("employee_id") or "").strip() or None,
+            }
+            for idx, person in enumerate(people_by_target)
+        ]
 
-            schedules = target.get("schedules") or []
-            for schedule_index, schedule in enumerate(schedules):
-                conflict = _find_asset_conflict(
-                    conn=conn,
-                    target_type=target_type,
-                    asset_id=asset_id,
-                    project_start=schedule["project_start"],
-                    project_end=schedule["project_end"],
-                )
+    def raise_conflict(idx: int, schedule_index: int, schedule: Dict[str, Any], conflict: Dict[str, Any]) -> None:
+        requested_label = schedule.get("label") or "Custom work"
+        existing_schedule_label = conflict.get("schedule_label") or "Custom work"
+        existing_schedule_index = conflict.get("schedule_index")
+        existing_schedule_text = (
+            f"window {int(existing_schedule_index) + 1}"
+            if existing_schedule_index is not None
+            else "fallback window"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Target {idx + 1}, window {schedule_index + 1} ({requested_label}) conflicts with "
+                f"an existing booking for {conflict['asset_label'] or conflict['line_name'] or conflict['line_id'] or '-'} "
+                f"({conflict['target_type']} {conflict['asset_id']}, {existing_schedule_text}: {existing_schedule_label}) "
+                f"from {conflict['project_start']} to {conflict['project_end']}."
+            ),
+        )
 
-                if conflict:
-                    requested_label = schedule.get("label") or "Custom work"
-                    existing_schedule_label = conflict.get("schedule_label") or "Custom work"
-                    existing_schedule_index = conflict.get("schedule_index")
-                    existing_schedule_text = (
-                        f"window {int(existing_schedule_index) + 1}"
-                        if existing_schedule_index is not None
-                        else "fallback window"
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                for idx, target in enumerate(validated_targets):
+                    target_type = target["target_type"]
+                    asset_id = target["asset_id"]
+                    if not asset_id:
+                        continue
+
+                    schedules = target.get("schedules") or []
+                    for schedule_index, schedule in enumerate(schedules):
+                        conflict = pg.find_asset_conflict(
+                            target_type=target_type,
+                            asset_id=asset_id,
+                            project_start=schedule["project_start"],
+                            project_end=schedule["project_end"],
+                        )
+                        if conflict:
+                            raise_conflict(idx, schedule_index, schedule, conflict)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+    else:
+        with get_db() as conn:
+            for idx, target in enumerate(validated_targets):
+                target_type = target["target_type"]
+                asset_id = target["asset_id"]
+                if not asset_id:
+                    continue
+
+                schedules = target.get("schedules") or []
+                for schedule_index, schedule in enumerate(schedules):
+                    conflict = _find_asset_conflict(
+                        conn=conn,
+                        target_type=target_type,
+                        asset_id=asset_id,
+                        project_start=schedule["project_start"],
+                        project_end=schedule["project_end"],
                     )
-                    raise HTTPException(
-                        status_code=409,
-                        detail=(
-                            f"Target {idx + 1}, window {schedule_index + 1} ({requested_label}) conflicts with "
-                            f"an existing booking for {conflict['asset_label'] or conflict['line_name'] or conflict['line_id'] or '-'} "
-                            f"({conflict['target_type']} {conflict['asset_id']}, {existing_schedule_text}: {existing_schedule_label}) "
-                            f"from {conflict['project_start']} to {conflict['project_end']}."
-                        ),
-                    )
+
+                    if conflict:
+                        raise_conflict(idx, schedule_index, schedule, conflict)
 
     saved_files: List[Dict[str, str]] = []
     app_id = str(uuid.uuid4())
@@ -2805,6 +3629,55 @@ async def apply_for_project(
         saved_files.append(await _save_validated_upload(f, app_id))
 
     try:
+        if _use_postgres_read_backend():
+            try:
+                with PostgresAppQueries() as pg:
+                    pg.create_application(
+                        application_id=app_id,
+                        submitted_at=now_iso,
+                        submitted_by_email=session_email,
+                        person_mode=person_mode,
+                        work_details=validated_work_details,
+                        contact_details=validated_contact_details,
+                        targets=validated_targets,
+                        people=people_records,
+                        uploads=saved_files,
+                    )
+                    write_audit_log(
+                        actor_email=session_email,
+                        actor_type="user",
+                        action_scope="user_action",
+                        action="application_submitted",
+                        entity_type="application",
+                        entity_id=app_id,
+                        new_value={"status": "submitted"},
+                        metadata={
+                            "application_id": app_id,
+                            "target_count": len(validated_targets),
+                            "upload_count": len(saved_files),
+                        },
+                        request=request,
+                        conn=pg._conn(),
+                    )
+                    if saved_files:
+                        write_audit_log(
+                            actor_email=session_email,
+                            actor_type="user",
+                            action_scope="user_action",
+                            action="file_upload_metadata_saved",
+                            entity_type="application",
+                            entity_id=app_id,
+                            metadata={
+                                "application_id": app_id,
+                                "file_count": len(saved_files),
+                            },
+                            request=request,
+                            conn=pg._conn(),
+                        )
+            except Exception as exc:
+                raise _postgres_read_unavailable(exc)
+            return JSONResponse({"ok": True, "application_id": app_id})
+
         with get_db() as conn:
             conn.execute(
                 """
@@ -2984,35 +3857,47 @@ def segment_bookings(
     week_start_dt = datetime.combine(week_start_d, datetime.min.time()).isoformat()
     week_end_dt = datetime.combine(week_end_d, datetime.min.time()).isoformat()
 
-    with get_db() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                a.status,
-                coalesce(nullif(t.target_type, ''), 'rail_segment') AS target_type,
-                coalesce(nullif(t.asset_id, ''), t.segment_id, '') AS asset_id,
-                t.asset_label,
-                t.asset_source,
-                t.segment_id,
-                t.line_id,
-                t.line_name,
-                coalesce(w.project_start, t.project_start) AS project_start,
-                coalesce(w.project_end, t.project_end) AS project_end,
-                w.label AS schedule_label,
-                w.window_index AS schedule_index
-            FROM applications a
-            JOIN application_targets t
-              ON t.application_id = a.application_id
-            LEFT JOIN application_target_windows w
-              ON w.target_id = t.id
-            WHERE coalesce(nullif(t.target_type, ''), 'rail_segment') = ?
-              AND coalesce(nullif(t.asset_id, ''), t.segment_id, '') = ?
-              AND coalesce(w.project_start, t.project_start) < ?
-              AND coalesce(w.project_end, t.project_end) > ?
-            ORDER BY coalesce(w.project_start, t.project_start) ASC
-            """,
-            (resolved_target_type, resolved_asset_id, week_end_dt, week_start_dt),
-        ).fetchall()
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                rows = pg.list_segment_bookings(
+                    target_type=resolved_target_type,
+                    asset_id=resolved_asset_id,
+                    range_start=week_start_dt,
+                    range_end=week_end_dt,
+                )
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+    else:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    a.status,
+                    coalesce(nullif(t.target_type, ''), 'rail_segment') AS target_type,
+                    coalesce(nullif(t.asset_id, ''), t.segment_id, '') AS asset_id,
+                    t.asset_label,
+                    t.asset_source,
+                    t.segment_id,
+                    t.line_id,
+                    t.line_name,
+                    coalesce(w.project_start, t.project_start) AS project_start,
+                    coalesce(w.project_end, t.project_end) AS project_end,
+                    w.label AS schedule_label,
+                    w.window_index AS schedule_index
+                FROM applications a
+                JOIN application_targets t
+                  ON t.application_id = a.application_id
+                LEFT JOIN application_target_windows w
+                  ON w.target_id = t.id
+                WHERE coalesce(nullif(t.target_type, ''), 'rail_segment') = ?
+                  AND coalesce(nullif(t.asset_id, ''), t.segment_id, '') = ?
+                  AND coalesce(w.project_start, t.project_start) < ?
+                  AND coalesce(w.project_end, t.project_end) > ?
+                ORDER BY coalesce(w.project_start, t.project_start) ASC
+                """,
+                (resolved_target_type, resolved_asset_id, week_end_dt, week_start_dt),
+            ).fetchall()
 
     bookings = []
     for row in rows:
@@ -3124,6 +4009,58 @@ async def api_transfer_apply(request: Request) -> JSONResponse:
 
     trip_id = str(uuid.uuid4())
     now_iso = datetime.now(timezone.utc).isoformat()
+    coords = route["geometry"]["coordinates"] or []
+
+    if _use_postgres_read_backend():
+        points = [
+            {
+                "point_index": idx,
+                "segment_id": None,
+                "lng": coord[0],
+                "lat": coord[1],
+            }
+            for idx, coord in enumerate(coords)
+        ]
+        try:
+            with PostgresAppQueries() as pg:
+                pg.create_transfer_trip(
+                    transfer_trip_id=trip_id,
+                    submitted_at=now_iso,
+                    submitted_by_email=session_email,
+                    start_stop_id=start_stop_id,
+                    start_stop_name=route["start_stop"]["name"],
+                    end_stop_id=end_stop_id,
+                    end_stop_name=route["end_stop"]["name"],
+                    planned_date=planned_date,
+                    planned_start_time=planned_start_time,
+                    planned_end_time=planned_end_time,
+                    tram_number=tram_number,
+                    reason=reason,
+                    notes=notes,
+                    route_distance_m=route["distance_m"],
+                    route_geometry=route["geometry"],
+                    points=points,
+                )
+                write_audit_log(
+                    actor_email=session_email,
+                    actor_type="user",
+                    action_scope="user_action",
+                    action="transfer_trip_submitted",
+                    entity_type="transfer_trip",
+                    entity_id=trip_id,
+                    new_value={"status": "submitted"},
+                    metadata={
+                        "transfer_trip_id": trip_id,
+                        "start_stop_id": start_stop_id,
+                        "end_stop_id": end_stop_id,
+                        "point_count": len(points),
+                    },
+                    request=request,
+                    conn=pg._conn(),
+                )
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        return JSONResponse({"ok": True, "transfer_trip_id": trip_id})
 
     with get_db() as conn:
         conn.execute(
@@ -3148,7 +4085,6 @@ async def api_transfer_apply(request: Request) -> JSONResponse:
             ),
         )
 
-        coords = route["geometry"]["coordinates"] or []
         for idx, coord in enumerate(coords):
             conn.execute(
                 """
@@ -3206,6 +4142,14 @@ def my_transfer_trips(request: Request) -> JSONResponse:
     user = _require_user(request)
     email = str(user.get("email") or "").strip().lower()
 
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                rows = pg.list_transfer_trips_for_email(email, limit=1000)
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        return JSONResponse({"transfer_trips": rows})
+
     with get_db() as conn:
         rows = conn.execute(
             """
@@ -3228,6 +4172,18 @@ def admin_list_transfer_trips(
     email: Optional[str] = None,
 ) -> JSONResponse:
     _require_admin(request)
+
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                rows = pg.list_transfer_trips(
+                    status=status,
+                    email=email,
+                    limit=1000,
+                )
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        return JSONResponse({"transfer_trips": rows})
 
     query = "SELECT * FROM transfer_trips WHERE 1=1"
     params: List[Any] = []
@@ -3253,6 +4209,16 @@ def admin_list_transfer_trips(
 def admin_get_transfer_trip(trip_id: str, request: Request) -> JSONResponse:
     _require_admin(request)
 
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                row = pg.get_transfer_trip_detail(trip_id)
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        if not row:
+            raise HTTPException(status_code=404, detail="Transfer trip not found.")
+        return JSONResponse(row)
+
     with get_db() as conn:
         row = conn.execute(
             "SELECT * FROM transfer_trips WHERE transfer_trip_id = ?",
@@ -3267,7 +4233,7 @@ def admin_get_transfer_trip(trip_id: str, request: Request) -> JSONResponse:
 
 @app.post("/api/admin/transfer_trips/{trip_id}/status")
 async def admin_update_transfer_trip_status(trip_id: str, request: Request) -> JSONResponse:
-    _require_admin(request)
+    user = _require_admin(request)
     body = await request.json()
     new_status = str(body.get("status") or "").strip().lower()
     admin_note = str(body.get("admin_note") or "").strip()
@@ -3279,6 +4245,45 @@ async def admin_update_transfer_trip_status(trip_id: str, request: Request) -> J
 
     if new_status == "submitted":
         decision_message = ""
+
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                with pg._conn().transaction():
+                    existing = pg.get_transfer_trip_detail(trip_id)
+                    if not existing:
+                        raise HTTPException(status_code=404, detail="Transfer trip not found.")
+                    updated = pg.update_transfer_trip_status(
+                        transfer_trip_id=trip_id,
+                        status=new_status,
+                        admin_note=admin_note,
+                        decision_message=decision_message,
+                    )
+                    if updated:
+                        write_audit_log(
+                            actor_email=str(user.get("email") or "").strip().lower(),
+                            actor_type="admin",
+                            action_scope="admin_action",
+                            action="transfer_trip_status_changed",
+                            entity_type="transfer_trip",
+                            entity_id=trip_id,
+                            old_value={"status": existing.get("status")},
+                            new_value={"status": new_status},
+                            metadata={"transfer_trip_id": trip_id},
+                            request=request,
+                            conn=pg._conn(),
+                        )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Transfer trip not found.")
+        return JSONResponse({
+            "ok": True,
+            "transfer_trip_id": trip_id,
+            "status": new_status,
+        })
 
     with get_db() as conn:
         row = conn.execute(
@@ -3307,7 +4312,36 @@ async def admin_update_transfer_trip_status(trip_id: str, request: Request) -> J
 
 @app.delete("/api/admin/transfer_trips/{trip_id}")
 async def admin_delete_transfer_trip(trip_id: str, request: Request) -> JSONResponse:
-    _require_admin(request)
+    user = _require_admin(request)
+
+    if _use_postgres_read_backend():
+        try:
+            with PostgresAppQueries() as pg:
+                with pg._conn().transaction():
+                    existing = pg.get_transfer_trip_detail(trip_id)
+                    if not existing:
+                        raise HTTPException(status_code=404, detail="Transfer trip not found.")
+                    deleted = pg.delete_transfer_trip(trip_id)
+                    if deleted:
+                        write_audit_log(
+                            actor_email=str(user.get("email") or "").strip().lower(),
+                            actor_type="admin",
+                            action_scope="admin_action",
+                            action="transfer_trip_deleted",
+                            entity_type="transfer_trip",
+                            entity_id=trip_id,
+                            old_value={"status": existing.get("status")},
+                            metadata={"deleted_entity_id": trip_id},
+                            request=request,
+                            conn=pg._conn(),
+                        )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise _postgres_read_unavailable(exc)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Transfer trip not found.")
+        return JSONResponse({"ok": True, "deleted": trip_id})
 
     with get_db() as conn:
         row = conn.execute(

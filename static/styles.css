@@ -972,7 +972,14 @@ label{ font-size:13px; color:var(--muted); }
 .gvb-tt-status{ font-size:12px; color:rgba(11,13,18,.78); }
 .tt-muted{ color:rgba(11,13,18,.55); }
 
-.leaflet-container{ background:#0f1320; }
+.leaflet-container{ background:#e6e9ee; }
+.leaflet-tile.gvb-basemap-tile{
+  width:257px !important;
+  height:257px !important;
+  border:0 !important;
+  outline:1px solid transparent;
+  backface-visibility:hidden;
+}
 
 /* Buttons */
 .btn{
@@ -1006,6 +1013,78 @@ label{ font-size:13px; color:var(--muted); }
   color:#fff;
 }
 .btn-apply:hover{ filter:brightness(1.06); }
+
+.btn-help{
+  height:42px;
+  padding:0 18px;
+  border-radius:8px;
+  border:1px solid rgba(84,110,122,.9);
+  background:#546e7a;
+  color:#fff;
+  font-weight:800;
+  font-size:14px;
+  line-height:1;
+}
+.btn-help:hover{
+  background:#455a64;
+  filter:none;
+}
+
+body.is-authenticated .new-nav-links .btn-help.auth-only{
+  display:inline-flex !important;
+  align-items:center;
+  justify-content:center;
+}
+
+.shepherd-element{
+  z-index:9999 !important;
+  max-width:320px;
+  pointer-events:auto;
+}
+
+.shepherd-text{
+  font-size:14px;
+  line-height:1.5;
+}
+
+.shepherd-footer{
+  gap:8px;
+  pointer-events:auto;
+}
+
+.shepherd-button{
+  border-radius:6px;
+  padding:6px 14px;
+  cursor:pointer;
+  font-weight:700;
+  pointer-events:auto;
+}
+
+.shepherd-button-primary{
+  background:#1976d2;
+  color:#fff;
+  border:none;
+}
+
+.shepherd-button-primary:hover{
+  background:#1565c0;
+  color:#fff;
+}
+
+.shepherd-button-secondary{
+  background:transparent;
+  color:#555;
+  border:1px solid #ccc;
+}
+
+.shepherd-button-secondary:hover{
+  background:rgba(0,0,0,.04);
+  color:#333;
+}
+
+.shepherd-modal-overlay-container{
+  z-index:9998 !important;
+}
 
 .btn-fav{
   background:rgba(255,255,255,.65);
@@ -1717,6 +1796,59 @@ body.panel-hidden .map-wrap{ border-right:none; }
 
 /* Applications list UI */
 .apps-list{ list-style:none; margin:10px 0 0 0; padding:0; }
+.settings-tabs{
+  display:flex;
+  gap:6px;
+  margin-bottom:12px;
+}
+.settings-tab{
+  border:1px solid rgba(11,13,18,.14);
+  background:#fff;
+  color:var(--text);
+  border-radius:8px;
+  padding:7px 10px;
+  font-size:12px;
+  font-weight:700;
+}
+.settings-tab.is-active{
+  border-color:rgba(11,107,181,.35);
+  background:rgba(11,107,181,.08);
+  color:var(--gvb-blue);
+}
+.settings-section-title{
+  font-size:14px;
+  margin:0 0 8px 0;
+}
+.activity-list{
+  list-style:none;
+  margin:10px 0 0 0;
+  padding:0;
+}
+.activity-item{
+  border:1px solid rgba(11,13,18,.12);
+  background:rgba(255,255,255,.62);
+  border-radius:10px;
+  padding:10px;
+  margin-bottom:8px;
+}
+.activity-item-main{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  font-size:13px;
+}
+.activity-item-main span{
+  color:rgba(11,13,18,.64);
+  font-size:12px;
+  white-space:nowrap;
+}
+.activity-item-meta{
+  color:rgba(11,13,18,.58);
+  font-size:12px;
+  margin-top:5px;
+  word-break:break-word;
+}
 .app-item{
   border:1px solid rgba(11,13,18,.12);
   background:rgba(255,255,255,.55);

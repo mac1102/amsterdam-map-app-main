@@ -6,15 +6,21 @@
   <title>GVB Tram communication map</title>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/shepherd.js@14/dist/css/shepherd.css">
   <link rel="stylesheet" href="/static/styles.css" />
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script type="module">
+    import Shepherd from "https://cdn.jsdelivr.net/npm/shepherd.js@14.5.1/dist/esm/shepherd.mjs";
+    window.Shepherd = Shepherd;
+    window.dispatchEvent(new Event("shepherd:ready"));
+  </script>
   <script async src="https://tally.so/widgets/embed.js"></script>
 </head>
 <body>
   <!-- Top Utility Bar -->
   <div class="new-utility-bar">
-    <div class="status" id="status" aria-live="polite" style="display:flex;align-items:center;">Loading...</div>
+    <div class="status" id="status" aria-live="polite" style="display:flex;align-items:center;" data-i18n="status_loading">Loading...</div>
 
     <div class="lang-wrap">
       <label class="sr-only" for="langSelect">Language</label>
@@ -39,21 +45,25 @@
         aria-controls="accountDropdown"
       >
         <span class="account-dot" aria-hidden="true"></span>
-        <span id="accountLabel">Account</span>
+        <span id="accountLabel" data-i18n="account_label">Account</span>
       </button>
 
       <!-- Account dropdown -->
-      <div id="accountDropdown" class="account-dropdown is-hidden" role="menu" aria-label="Account menu">
+      <div id="accountDropdown" class="account-dropdown is-hidden" role="menu" aria-label="Account menu" data-i18n-aria-label="account_menu_aria">
         <div class="account-header">
           <div class="account-email" id="accountEmail"></div>
         </div>
 
-        <button id="myAppsBtn" class="account-item" type="button" role="menuitem">
+        <button id="myAppsBtn" class="account-item" type="button" role="menuitem" data-i18n="my_applications">
           My applications
         </button>
 
-        <button id="manageAppsBtn" class="account-item is-hidden" type="button" role="menuitem">
+        <button id="manageAppsBtn" class="account-item is-hidden" type="button" role="menuitem" data-i18n="manage_applications">
           Manage applications
+        </button>
+
+        <button id="settingsBtn" class="account-item" type="button" role="menuitem" data-i18n="settings">
+          Settings
         </button>
 
         <button id="logoutBtn" class="account-item danger" type="button" role="menuitem" data-i18n="logout">
@@ -71,9 +81,12 @@
         <span class="new-nav-title" data-i18n="app_title">Tram communication map</span>
       </div>
       <div class="new-nav-links">
-        <a href="#home" class="new-nav-link new-nav-link-active">Plan Work</a>
+        <a href="#home" class="new-nav-link new-nav-link-active" data-i18n="plan_work">Plan Work</a>
         <a href="#mapPage" class="new-nav-link auth-only" data-i18n="view_map">Live Map</a>
         <a href="/list-view" class="new-nav-link auth-only" data-i18n="list_view">My Permits</a>
+        <button id="helpTourBtn" class="btn btn-help auth-only" type="button" data-i18n="help">
+          Help
+        </button>
         <button class="new-nav-btn auth-only" onclick="document.getElementById('myAppsBtn').click()">
           <svg /* HardHat */ stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="20" height="20"><path d="M2 18a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v2z"/><path d="M10 10V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5"/><path d="M4 14v-3a8 8 0 0 1 16 0v3"/></svg>
           <span data-i18n="my_applications">Mijn Projecten</span>
@@ -101,20 +114,20 @@
           <div class="new-alert-box">
             <div class="new-alert-title">
               <svg /* AlertTriangle */ stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4 M12 17h.01"/></svg>
-              <span data-i18n="safety_modal_title">Active Alert</span>
+              <span data-i18n="active_alert">Active Alert</span>
             </div>
-            <p>Overlapping or conflicting schedules can create safety and reliability risks.</p>
+            <p data-i18n="alert_body">Overlapping or conflicting schedules can create safety and reliability risks.</p>
           </div>
         </div>
 
         <!-- The Quick Access Widget -->
         <div class="new-planner">
           <div class="new-planner-tabs">
-            <button class="new-planner-tab active">Quick Access</button>
+            <button class="new-planner-tab active" data-i18n="quick_access">Quick Access</button>
           </div>
-          
+
           <div class="new-planner-body">
-            <p class="planner-desc">Choose how you want to view the network and coordinate work.</p>
+            <p class="planner-desc" data-i18n="quick_access_desc">Choose how you want to view the network and coordinate work.</p>
 
             <a href="#mapPage" class="btn-planner-large auth-only">
               <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="32" height="32"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" x2="9" y1="3" y2="18"/><line x1="15" x2="15" y1="6" y2="21"/></svg>
@@ -153,7 +166,7 @@
         </a>
         <a href="#" class="new-quick-item">
           <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="32" height="32" class="text-gvb-blue"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></svg>
-          <span>Manuals</span>
+          <span data-i18n="manuals">Manuals</span>
         </a>
       </div>
     </div>
@@ -166,25 +179,25 @@
         
         <!-- Block 1 -->
         <div class="new-info-card border-blue">
-          <h2>Why use the coordination map?</h2>
-          <p>Overlapping schedules create safety risks. Our tool automatically detects conflicts where multiple lines share track sections, platforms, or junctions.</p>
+          <h2 data-i18n="info_why_title">Why use the coordination map?</h2>
+          <p data-i18n="info_why_body">Overlapping schedules create safety risks. Our tool automatically detects conflicts where multiple lines share track sections, platforms, or junctions.</p>
           <ul>
-            <li><div class="check-icon">&#10003;</div> Real-time conflict detection</li>
-            <li><div class="check-icon">&#10003;</div> Direct approval workflow</li>
-            <li><div class="check-icon">&#10003;</div> Mobile-friendly for on-site use</li>
+            <li><div class="check-icon">&#10003;</div> <span data-i18n="info_why_li1">Real-time conflict detection</span></li>
+            <li><div class="check-icon">&#10003;</div> <span data-i18n="info_why_li2">Direct approval workflow</span></li>
+            <li><div class="check-icon">&#10003;</div> <span data-i18n="info_why_li3">Mobile-friendly for on-site use</span></li>
           </ul>
-          <a href="javascript:void(0)" class="read-more-link" onclick="document.getElementById('safetyBtn').click()">Read the safety guidelines <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path d="M5 12h14 M12 5l7 7-7 7"/></svg></a>
+          <a href="javascript:void(0)" class="read-more-link" onclick="document.getElementById('safetyBtn').click()"><span data-i18n="info_read_more">Read the safety guidelines</span> <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path d="M5 12h14 M12 5l7 7-7 7"/></svg></a>
         </div>
 
         <!-- Block 2 -->
         <div class="new-info-card border-red">
-          <h2>Application Process</h2>
-          <p>Applying for a project work area is mandatory. Follow the 4 steps to get your project approved safely by the network control center.</p>
+          <h2 data-i18n="info_process_title">Application Process</h2>
+          <p data-i18n="info_process_body">Applying for a project work area is mandatory. Follow the 4 steps to get your project approved safely by the network control center.</p>
           <div class="process-steps">
-            <div class="process-step"><div class="step-num">1</div><span>Select segment or custom area</span></div>
-            <div class="process-step"><div class="step-num">2</div><span>Upload required documents (PDF/DOCX)</span></div>
-            <div class="process-step"><div class="step-num">3</div><span>Set specific time blocks</span></div>
-            <div class="process-step"><div class="step-num">4</div><span>Review and submit</span></div>
+            <div class="process-step"><div class="step-num">1</div><span data-i18n="info_process_step1">Select segment or custom area</span></div>
+            <div class="process-step"><div class="step-num">2</div><span data-i18n="info_process_step2">Upload required documents (PDF/DOCX)</span></div>
+            <div class="process-step"><div class="step-num">3</div><span data-i18n="info_process_step3">Set specific time blocks</span></div>
+            <div class="process-step"><div class="step-num">4</div><span data-i18n="info_process_step4">Review and submit</span></div>
           </div>
         </div>
 
@@ -203,32 +216,32 @@
         <div id="timelineActiveLabel" class="timeline-active-label is-hidden" aria-live="polite"></div>
         <div id="transferMapBanner" class="transfer-map-banner is-hidden" aria-live="polite">
           <div class="transfer-map-banner-copy">
-            <strong>Overbrengsrit intekenen</strong>
-            <span id="transferMapInstruction">Click a start tram stop</span>
+            <strong data-i18n="transfer_intekenen">Overbrengsrit intekenen</strong>
+            <span id="transferMapInstruction" data-i18n="transfer_click_start">Click a start tram stop</span>
           </div>
           <div class="transfer-map-banner-actions">
-            <button id="transferUndoBtn" class="btn btn-sm" type="button">Undo last</button>
-            <button id="transferResetBtn" class="btn btn-sm" type="button">Reset</button>
-            <button id="transferCloseModeBtn" class="btn btn-sm" type="button">Close</button>
+            <button id="transferUndoBtn" class="btn btn-sm" type="button" data-i18n="transfer_undo_last">Undo last</button>
+            <button id="transferResetBtn" class="btn btn-sm" type="button" data-i18n="transfer_reset">Reset</button>
+            <button id="transferCloseModeBtn" class="btn btn-sm" type="button" data-i18n="transfer_close">Close</button>
           </div>
         </div>
 
         <aside id="transferRoutePanel" class="transfer-route-panel is-hidden" aria-label="Overbrengsrit panel">
           <div class="transfer-route-panel-head">
-            <h3>Overbrengsrit aanvragen</h3>
-            <span id="transferPanelStepLabel" class="transfer-panel-step-label">Route</span>
+            <h3 data-i18n="transfer_aanvragen">Overbrengsrit aanvragen</h3>
+            <span id="transferPanelStepLabel" class="transfer-panel-step-label" data-i18n="transfer_route">Route</span>
           </div>
           <div class="transfer-route-summary">
-            <div>Start: <span id="transferStartLabel">-</span></div>
-            <div>End: <span id="transferEndLabel">-</span></div>
-            <div>Distance: <span id="transferDistanceLabel">-</span></div>
-            <div id="transferRouteStatus" class="transfer-route-status">Select two tram stops.</div>
+            <div><span data-i18n="transfer_start">Start</span>: <span id="transferStartLabel">-</span></div>
+            <div><span data-i18n="transfer_end">End</span>: <span id="transferEndLabel">-</span></div>
+            <div><span data-i18n="transfer_distance">Distance</span>: <span id="transferDistanceLabel">-</span></div>
+            <div id="transferRouteStatus" class="transfer-route-status" data-i18n="transfer_select_two_stops">Select two tram stops.</div>
           </div>
           <div id="transferPanelBody" class="transfer-panel-body"></div>
           <div class="transfer-route-panel-actions">
-            <button id="transferBackBtn" class="btn btn-sm is-hidden" type="button">Back</button>
-            <button id="transferContinueBtn" class="btn btn-apply" type="button" disabled>Continue</button>
-            <button id="transferSubmitBtn" class="btn btn-apply is-hidden" type="button">Submit Transfer Trip</button>
+            <button id="transferBackBtn" class="btn btn-sm is-hidden" type="button" data-i18n="transfer_back">Back</button>
+            <button id="transferContinueBtn" class="btn btn-apply" type="button" disabled data-i18n="transfer_continue">Continue</button>
+            <button id="transferSubmitBtn" class="btn btn-apply is-hidden" type="button" data-i18n="transfer_submit">Submit Transfer Trip</button>
           </div>
         </aside>
 
@@ -241,14 +254,14 @@
             aria-controls="mapLayerPanelBody"
           >
             <span id="mapLayerChevron" class="map-layer-chevron" aria-hidden="true"></span>
-            <span class="map-layer-title">MAP LAYERS</span>
+            <span class="map-layer-title" data-i18n="map_layers">MAP LAYERS</span>
             <span id="mapLayerActiveCount" class="map-layer-active-count">0 / 8 active</span>
           </button>
 
           <div id="mapLayerPanelBody" class="map-layer-panel-body">
             <div class="map-layer-toolbar">
-              <span class="map-layer-priority">LOW</span>
-              <button id="mapLayerOrderBtn" class="map-layer-order" type="button">Order</button>
+              <span class="map-layer-priority" data-i18n="layer_priority_low">LOW</span>
+              <button id="mapLayerOrderBtn" class="map-layer-order" type="button" data-i18n="layer_order">Order</button>
             </div>
 
             <div id="mapLayerList" class="map-layer-list" role="list"></div>
@@ -258,13 +271,10 @@
         
         <!-- Map Timeline Actions -->
         <div class="map-timeline-actions auth-only">
-          <button id="timelineApplyBtn" class="btn btn-apply" type="button" data-i18n="apply_for_project">
-            Apply for project
-          </button>
           <button id="timelineTransferBtn" class="btn btn-transfer" type="button">
-            🚊 Overbrengsrit
+            🚊 <span data-i18n="transfer_button">Overbrengsrit</span>
           </button>
-          <button class="btn btn-feedback auth-only" data-tally-open="b5Yd90" data-tally-emoji-text="👋" data-tally-emoji-animation="wave" type="button">
+          <button class="btn btn-feedback auth-only" data-tally-open="b5Yd90" data-tally-emoji-text="👋" data-tally-emoji-animation="wave" type="button" data-i18n="feedback_btn">
             Feedback
           </button>
         </div>
@@ -272,15 +282,15 @@
         <div id="timelineBar" class="timeline-bar" aria-label="Timeline werkzaamheden">
           <div class="timeline-header">
             <div class="timeline-header-copy">
-              <h3 class="timeline-title">Timeline werkzaamheden</h3>
-              <p id="timelineStatus" class="timeline-status">Loading timeline...</p>
+              <h3 class="timeline-title" data-i18n="timeline_title">Timeline werkzaamheden</h3>
+              <p id="timelineStatus" class="timeline-status" data-i18n="timeline_loading">Loading timeline...</p>
               <p id="timelineSelectedMeta" class="timeline-selected-label is-hidden"></p>
             </div>
             <div class="timeline-header-right">
               <div class="timeline-legend" aria-label="Timeline legend">
                 <span class="timeline-legend-item">
                   <span class="timeline-legend-swatch internal" aria-hidden="true"></span>
-                  Internal
+                  <span data-i18n="timeline_legend_internal">Internal</span>
                 </span>
                 <span class="timeline-legend-item">
                   <span class="timeline-legend-swatch wior" aria-hidden="true"></span>
@@ -292,17 +302,17 @@
                 </span>
                 <span class="timeline-legend-item">
                   <span class="timeline-legend-swatch warning" aria-hidden="true"></span>
-                  BB/Warning
+                  <span data-i18n="timeline_legend_warning">BB/Warning</span>
                 </span>
               </div>
               <div class="timeline-header-actions">
-                <button id="timelinePrevWeekBtn" class="timeline-nav-button" type="button">
+                <button id="timelinePrevWeekBtn" class="timeline-nav-button" type="button" data-i18n="timeline_prev_week">
                   &lt; Week
                 </button>
-                <button id="timelineNextWeekBtn" class="timeline-nav-button" type="button">
+                <button id="timelineNextWeekBtn" class="timeline-nav-button" type="button" data-i18n="timeline_next_week">
                   Week &gt;
                 </button>
-                <button id="timelineResetBtn" class="timeline-reset-button is-hidden" type="button">
+                <button id="timelineResetBtn" class="timeline-reset-button is-hidden" type="button" data-i18n="timeline_reset">
                   Reset
                 </button>
               </div>
@@ -361,6 +371,7 @@
                 aria-expanded="true"
                 aria-controls="filterBlockBody"
                 title="Hide filter lines"
+                data-i18n="filter_hide"
               >
                 Hide
               </button>
@@ -386,6 +397,7 @@
                 spellcheck="false"
                 aria-label="Filter lines"
                 placeholder="Search lines..."
+                data-i18n-placeholder="filter_search_lines"
               />
             </div>
 
@@ -404,11 +416,11 @@
             </button>
 
             <button id="transferTripBtn" class="btn btn-transfer" type="button">
-              🚊 Overbrengsrit
+              🚊 <span data-i18n="transfer_button">Overbrengsrit</span>
             </button>
 
             <button id="favoriteBtn" class="btn btn-fav" type="button" aria-pressed="false">
-              &#9734; Add line to favorite
+              &#9734; <span data-i18n="add_to_favorites">Add line to favorite</span>
             </button>
           </div>
 
@@ -508,6 +520,29 @@
     </div>
   </div>
 
+  <!-- SETTINGS MODAL -->
+  <div id="settingsModal" class="modal" aria-hidden="true">
+    <div id="settingsBackdrop" class="modal-backdrop"></div>
+    <div class="modal-card modal-card-right" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1">
+      <div class="modal-head">
+        <h2 id="settingsTitle" data-i18n="settings">Settings</h2>
+        <button id="settingsCloseBtn" class="btn btn-ghost" type="button" aria-label="Close settings dialog" title="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+          <button class="settings-tab is-active" type="button" role="tab" aria-selected="true" data-i18n="activity">Activity</button>
+        </div>
+        <section class="settings-section" aria-labelledby="settingsActivityTitle">
+          <h3 id="settingsActivityTitle" class="settings-section-title" data-i18n="activity">Activity</h3>
+          <p id="settingsActivityLoading" class="hint is-hidden" data-i18n="activity_loading">Loading activity...</p>
+          <p id="settingsActivityEmpty" class="hint is-hidden" data-i18n="activity_empty">No activity recorded yet.</p>
+          <p id="settingsActivityError" class="hint is-hidden" data-i18n="activity_error">Could not load activity.</p>
+          <ul id="settingsActivityList" class="activity-list"></ul>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <!-- APPLY MODAL (CENTERED, 5-STEP WIZARD) -->
   <div id="applyModal" class="modal" aria-hidden="true">
     <div id="applyBackdrop" class="modal-backdrop"></div>
@@ -521,7 +556,7 @@
     >
       <div class="modal-head">
         <div class="wizard-head-left">
-          <h2 id="applyTitle">Apply for project</h2>
+          <h2 id="applyTitle" data-i18n="apply_modal_title">Apply for project</h2>
           <p id="applyStepLabel" class="wizard-step-label">Step 1 of 5</p>
         </div>
         <button
@@ -558,11 +593,11 @@
 
           <!-- STEP 1 -->
           <section id="applyStep1" class="apply-step">
-            <h3 class="wizard-title">Step 1 - Location</h3>
+            <h3 class="wizard-title" data-i18n="wizard_step1">Step 1 - Location</h3>
             <p class="hint" id="applyContextText"></p>
 
             <div class="wizard-block">
-              <p class="hint">
+              <p class="hint" data-i18n="wizard_step1_hint">
                 You can apply for up to 3 selected segments. For each segment, choose whole segment or custom area.
               </p>
             </div>
@@ -573,16 +608,16 @@
 
           <!-- STEP 2 -->
           <section id="applyStep2" class="apply-step is-hidden">
-            <h3 class="wizard-title">Step 2 - Work details</h3>
+            <h3 class="wizard-title" data-i18n="wizard_step2">Step 2 - Work details</h3>
             <div id="workDetailsStep2"></div>
           </section>
 
           <!-- STEP 3 -->
           <section id="applyStep3" class="apply-step is-hidden">
-            <h3 class="wizard-title">Step 3 - Planning</h3>
+            <h3 class="wizard-title" data-i18n="wizard_step3">Step 3 - Planning</h3>
 
             <div class="wizard-block">
-              <p class="hint">
+              <p class="hint" data-i18n="wizard_step3_hint">
                 Set one time block for each selected segment.
               </p>
             </div>
@@ -592,17 +627,17 @@
 
           <!-- STEP 4 -->
           <section id="applyStep4" class="apply-step is-hidden">
-            <h3 class="wizard-title">Step 4 - Contact &amp; VVW</h3>
+            <h3 class="wizard-title" data-i18n="wizard_step4">Step 4 - Contact &amp; VVW</h3>
 
             <div class="wizard-block">
               <label class="wizard-radio">
                 <input type="radio" name="personModeChoice" value="single" checked />
-                <span>One person for all selected segments</span>
+                <span data-i18n="wizard_person_single">One person for all selected segments</span>
               </label>
 
               <label class="wizard-radio">
                 <input type="radio" name="personModeChoice" value="per-segment" />
-                <span>Different person for each segment</span>
+                <span data-i18n="wizard_person_multi">Different person for each segment</span>
               </label>
             </div>
 
@@ -611,7 +646,7 @@
             <div id="contactVvwForms"></div>
 
             <div class="field">
-              <label for="safetyPlans">Upload safety plan(s) *</label>
+              <label for="safetyPlans" data-i18n="upload_safety_plans">Upload safety plan(s) *</label>
               <input
                 id="safetyPlans"
                 name="safety_plans"
@@ -620,13 +655,13 @@
                 required
                 accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
               />
-              <p class="hint">Upload PDF/DOC/DOCX or images. You can select multiple files.</p>
+              <p class="hint" data-i18n="upload_hint">Upload PDF/DOC/DOCX or images. You can select multiple files.</p>
             </div>
           </section>
 
           <!-- STEP 5 -->
           <section id="applyStep5" class="apply-step is-hidden">
-            <h3 class="wizard-title">Step 5 - Review</h3>
+            <h3 class="wizard-title" data-i18n="wizard_step5">Step 5 - Review</h3>
             <div id="applyReviewBox" class="review-box"></div>
           </section>
 
@@ -639,10 +674,10 @@
           ></div>
 
           <div class="modal-foot apply-foot">
-            <button id="applyBackBtn" class="btn" type="button">Back</button>
-            <button id="applyNextBtn" class="btn btn-apply" type="button">Next</button>
-            <button id="applySubmitBtn" class="btn btn-apply is-hidden" type="submit">Submit application</button>
-            <button id="applyCancelBtn" class="btn" type="button">Cancel</button>
+            <button id="applyBackBtn" class="btn" type="button" data-i18n="apply_back">Back</button>
+            <button id="applyNextBtn" class="btn btn-apply" type="button" data-i18n="apply_next">Next</button>
+            <button id="applySubmitBtn" class="btn btn-apply is-hidden" type="submit" data-i18n="apply_submit">Submit application</button>
+            <button id="applyCancelBtn" class="btn" type="button" data-i18n="cancel">Cancel</button>
           </div>
         </form>
       </div>
@@ -654,12 +689,12 @@
     <div id="applySuccessBackdrop" class="modal-backdrop"></div>
     <div class="modal-card modal-card-success" role="dialog" aria-modal="true" aria-labelledby="applySuccessTitle" tabindex="-1">
       <div class="success-checkmark" aria-hidden="true">✓</div>
-      <h2 id="applySuccessTitle" class="success-modal-title">Application submitted</h2>
-      <p class="success-modal-text">Your application has been submitted successfully.</p>
-      <p class="success-modal-reference">Reference: <strong id="applySuccessReference">-</strong></p>
+      <h2 id="applySuccessTitle" class="success-modal-title" data-i18n="apply_success_title">Application submitted</h2>
+      <p class="success-modal-text" data-i18n="apply_success_text">Your application has been submitted successfully.</p>
+      <p class="success-modal-reference"><span data-i18n="apply_success_reference">Reference:</span> <strong id="applySuccessReference">-</strong></p>
       <div class="form-actions success-modal-actions">
-        <button id="applySuccessViewAppsBtn" class="btn btn-apply" type="button">View my applications</button>
-        <button id="applySuccessCloseBtn" class="btn" type="button">Close</button>
+        <button id="applySuccessViewAppsBtn" class="btn btn-apply" type="button" data-i18n="apply_success_view">View my applications</button>
+        <button id="applySuccessCloseBtn" class="btn" type="button" data-i18n="apply_success_close">Close</button>
       </div>
     </div>
   </div>
@@ -673,7 +708,7 @@
         <button id="appsCloseBtn" class="btn btn-ghost" type="button" aria-label="Close applications dialog" title="Close">&times;</button>
       </div>
       <div class="modal-body">
-        <p id="appsLoading" class="hint is-hidden">Loading applications...</p>
+        <p id="appsLoading" class="hint is-hidden" data-i18n="apps_loading">Loading applications...</p>
         <p id="appsEmpty" class="hint is-hidden" data-i18n="no_applications">No applications yet.</p>
         <ul id="appsList" class="apps-list"></ul>
       </div>
@@ -688,31 +723,31 @@
             <img src="/static/img/gvb-logo.png" alt="GVB" style="height: 32px; width: auto; object-fit: contain;" />
             <span>GVB Amsterdam</span>
           </div>
-          <p>Internal tool for coordinating track work, maintenance, and projects across the Amsterdam tram network.</p>
+          <p data-i18n="footer_about">Internal tool for coordinating track work, maintenance, and projects across the Amsterdam tram network.</p>
         </div>
         <div>
-          <h4>Quick Links</h4>
+          <h4 data-i18n="footer_quick_links">Quick Links</h4>
           <ul>
-            <li><a href="#mapPage">Live Map</a></li>
-            <li><a href="/list-view">List View</a></li>
-            <li><a href="javascript:void(0)" onclick="document.getElementById('myAppsBtn').click()">My Applications</a></li>
+            <li><a href="#mapPage" data-i18n="view_map">Live Map</a></li>
+            <li><a href="/list-view" data-i18n="list_view">List View</a></li>
+            <li><a href="javascript:void(0)" onclick="document.getElementById('myAppsBtn').click()" data-i18n="my_applications">My Applications</a></li>
           </ul>
         </div>
         <div>
-          <h4>Support</h4>
+          <h4 data-i18n="footer_support">Support</h4>
           <ul>
-            <li><a href="#">Contact Control Center</a></li>
-            <li><a href="#">Safety Manuals</a></li>
-            <li><a href="#">Report an Issue</a></li>
+            <li><a href="#" data-i18n="footer_contact">Contact Control Center</a></li>
+            <li><a href="#" data-i18n="footer_safety_manuals">Safety Manuals</a></li>
+            <li><a href="#" data-i18n="footer_report">Report an Issue</a></li>
           </ul>
         </div>
       </div>
       <div class="footer-bottom">
-        <div>&copy; 2026 GVB Amsterdam. All rights reserved.</div>
+        <div data-i18n="footer_copyright">&copy; 2026 GVB Amsterdam. All rights reserved.</div>
         <div class="footer-links">
-          <a href="#">Privacy</a>
-          <a href="#">Terms</a>
-          <a href="#">Cookies</a>
+          <a href="#" data-i18n="footer_privacy">Privacy</a>
+          <a href="#" data-i18n="footer_terms">Terms</a>
+          <a href="#" data-i18n="footer_cookies">Cookies</a>
         </div>
       </div>
     </div>

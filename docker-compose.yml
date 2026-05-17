@@ -1,0 +1,20 @@
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: gvb-map-postgis
+    environment:
+      POSTGRES_DB: gvb_map
+      POSTGRES_USER: gvb_user
+      POSTGRES_PASSWORD: change_me
+    ports:
+      - "5432:5432"
+    volumes:
+      - gvb_postgis_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gvb_user -d gvb_map"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  gvb_postgis_data:

@@ -233,7 +233,7 @@ export function syncWizardUI() {
   });
 
   if (dom.applyStepLabel) {
-    dom.applyStepLabel.textContent = `Step ${step} of ${APPLY_TOTAL_STEPS}`;
+    dom.applyStepLabel.textContent = t("apply_step_of").replace("{n}", step);
   }
 
   if (dom.wizardProgressBar) {
@@ -1114,20 +1114,6 @@ export function wireApplicationHandlers() {
   }
 
 
-  if (dom.timelineApplyBtn) {
-    dom.timelineApplyBtn.addEventListener("click", () => {
-      if (!state.currentUser) {
-        showToast({
-          title: t("login_required_title"),
-          message: t("login_required_msg"),
-          actionText: t("login_action"),
-          onAction: () => openLogin(),
-        });
-        return;
-      }
-      openApplyForSegments();
-    });
-  }
 if (dom.applyProjectBtn) {
     dom.applyProjectBtn.addEventListener("click", () => {
       if (!state.currentUser) {

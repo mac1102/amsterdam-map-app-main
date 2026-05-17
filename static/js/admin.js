@@ -280,7 +280,8 @@ async function renderAdminTargetMiniMap(application) {
 
     L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
       maxZoom: 19,
-      attribution: "&copy; OpenStreetMap &copy; CARTO"
+      attribution: "&copy; OpenStreetMap &copy; CARTO",
+      className: "gvb-basemap-tile"
     }).addTo(map);
 
     const featureCollection = {
@@ -811,7 +812,8 @@ async function renderAdminTransferRouteMiniMap(trip) {
 
     L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
       maxZoom: 19,
-      attribution: "&copy; OpenStreetMap &copy; CARTO"
+      attribution: "&copy; OpenStreetMap &copy; CARTO",
+      className: "gvb-basemap-tile"
     }).addTo(map);
 
     const line = L.polyline(latLngs, {
@@ -1328,7 +1330,8 @@ function initTbgnDrawingMap(geometry = null) {
     L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
       attribution: "&copy; OpenStreetMap &copy; CARTO",
       maxZoom: 19,
-      noWrap: true
+      noWrap: true,
+      className: "gvb-basemap-tile"
     }).addTo(tbgnDrawMap);
 
     tbgnDrawnItems = new L.FeatureGroup();

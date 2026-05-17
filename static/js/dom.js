@@ -41,7 +41,8 @@ export const dom = {
   accountEmail: document.getElementById("accountEmail"),
   accountDropdown: document.getElementById("accountDropdown"),
   myAppsBtn: document.getElementById("myAppsBtn"),
-manageAppsBtn: document.getElementById("manageAppsBtn"),
+  manageAppsBtn: document.getElementById("manageAppsBtn"),
+  settingsBtn: document.getElementById("settingsBtn"),
   logoutBtn: document.getElementById("logoutBtn"),
 
   loginModal: document.getElementById("loginModal"),
@@ -66,6 +67,14 @@ manageAppsBtn: document.getElementById("manageAppsBtn"),
   favoritesList: document.getElementById("favoritesList"),
   favoritesEmpty: document.getElementById("favoritesEmpty"),
   favoritesClearBtn: document.getElementById("favoritesClearBtn"),
+
+  settingsModal: document.getElementById("settingsModal"),
+  settingsBackdrop: document.getElementById("settingsBackdrop"),
+  settingsCloseBtn: document.getElementById("settingsCloseBtn"),
+  settingsActivityList: document.getElementById("settingsActivityList"),
+  settingsActivityLoading: document.getElementById("settingsActivityLoading"),
+  settingsActivityEmpty: document.getElementById("settingsActivityEmpty"),
+  settingsActivityError: document.getElementById("settingsActivityError"),
 
   appsModal: document.getElementById("appsModal"),
   appsBackdrop: document.getElementById("appsBackdrop"),
@@ -134,7 +143,6 @@ manageAppsBtn: document.getElementById("manageAppsBtn"),
   safetyPlans: document.getElementById("safetyPlans"),
 
   
-  timelineApplyBtn: document.getElementById("timelineApplyBtn"),
   timelineTransferBtn: document.getElementById("timelineTransferBtn"),
   transferTripBtn: document.getElementById("transferTripBtn"),
   transferMapBanner: document.getElementById("transferMapBanner"),

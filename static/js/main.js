@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { dom } from "./dom.js";
 import { setStatus } from "./utils.js";
-import { loadLang, setLang, applyTranslations } from "./i18n.js";
+import { loadLang, setLang, applyTranslations, t } from "./i18n.js";
 import {
   refreshMe,
   toggleAccountMenu,
@@ -40,6 +40,8 @@ import {
 import { openMyApplications, wireApplicationHandlers, openApplyForSegments } from "./applications.js";
 import { initMap, selectLineById, setSelection } from "./map.js";
 import { initTransfer } from "./transfer.js";
+import { startTour, maybeInitTour } from "./tour.js";
+import { openSettings, closeSettings } from "./settings.js";
 
 
 async function init() {
@@ -80,8 +82,8 @@ async function init() {
 
       if (dom.toggleFilterBlockBtn) {
         dom.toggleFilterBlockBtn.setAttribute("aria-expanded", filterHidden ? "false" : "true");
-        dom.toggleFilterBlockBtn.textContent = filterHidden ? "Show" : "Hide";
-        dom.toggleFilterBlockBtn.title = filterHidden ? "Show filter lines" : "Hide filter lines";
+        dom.toggleFilterBlockBtn.textContent = filterHidden ? t("filter_show") : t("filter_hide");
+        dom.toggleFilterBlockBtn.title = filterHidden ? t("filter_show") : t("filter_hide");
       }
     } catch {}
 
@@ -91,8 +93,8 @@ async function init() {
         document.body.classList.toggle("filter-block-hidden", hidden);
 
         dom.toggleFilterBlockBtn.setAttribute("aria-expanded", hidden ? "false" : "true");
-        dom.toggleFilterBlockBtn.textContent = hidden ? "Show" : "Hide";
-        dom.toggleFilterBlockBtn.title = hidden ? "Show filter lines" : "Hide filter lines";
+        dom.toggleFilterBlockBtn.textContent = hidden ? t("filter_show") : t("filter_hide");
+        dom.toggleFilterBlockBtn.title = hidden ? t("filter_show") : t("filter_hide");
 
         try {
           localStorage.setItem("gvbFilterBlockHidden", hidden ? "1" : "0");
@@ -115,6 +117,13 @@ async function init() {
       dom.manageAppsBtn.addEventListener("click", () => {
         setAccountMenuOpen(false);
         window.location.href = "/admin";
+      });
+    }
+
+    if (dom.settingsBtn) {
+      dom.settingsBtn.addEventListener("click", () => {
+        setAccountMenuOpen(false);
+        openSettings();
       });
     }
 
@@ -168,6 +177,7 @@ async function init() {
 
           if (!state.map && state.currentUser) {
             await initMap();
+            maybeInitTour();
           }
 
           if (state.map) setTimeout(() => state.map.invalidateSize(), 50);
@@ -192,6 +202,9 @@ async function init() {
     }
     if (dom.favoritesCloseBtn) dom.favoritesCloseBtn.addEventListener("click", () => closeModal(dom.favoritesModal));
     if (dom.favoritesBackdrop) dom.favoritesBackdrop.addEventListener("click", () => closeModal(dom.favoritesModal));
+
+    if (dom.settingsCloseBtn) dom.settingsCloseBtn.addEventListener("click", closeSettings);
+    if (dom.settingsBackdrop) dom.settingsBackdrop.addEventListener("click", closeSettings);
 
     if (dom.favoritesClearBtn) {
       dom.favoritesClearBtn.addEventListener("click", () => {
@@ -327,8 +340,9 @@ async function init() {
 
     if (state.currentUser) {
       await initMap();
+      maybeInitTour();
     } else {
-      setStatus("Login to load map data");
+      setStatus(t("status_login_required"));
     }
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -349,7 +363,7 @@ async function init() {
     }
 
     applyTranslations();
-    setStatus(state.currentUser ? "Ready" : "Login to load map data");
+    setStatus(state.currentUser ? t("status_ready") : t("status_login_required"));
   } catch (err) {
     console.error(err);
     setStatus(`Error: ${err.message}`);

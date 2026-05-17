@@ -442,7 +442,7 @@ function renderTimelineOverview() {
   dom.timelineScroll.scrollLeft = Math.max(0, dom.timelineScroll.scrollLeft);
 
   if (state.timeline.loading && !state.timeline.overview.length) {
-    setTimelineStatusText("Loading timeline...");
+    setTimelineStatusText(t("timeline_loading"));
   } else if (state.timeline.error) {
     setTimelineStatusText(state.timeline.error);
   } else if (state.timeline.selectedDate) {
@@ -1193,7 +1193,7 @@ export function updateLayerPanelCount() {
     if (state.mapLayerVisibility[def.key]) activeCount += 1;
   }
 
-  dom.mapLayerActiveCount.textContent = `${activeCount} / ${totalCount} active`;
+  dom.mapLayerActiveCount.textContent = `${activeCount} / ${totalCount} ${t("layer_active_count")}`;
 }
 
 export function setLayerVisibility(layerKey, visible) {
@@ -2279,12 +2279,12 @@ export function fixMapSizeSoon() {
 }
 export async function initMap() {
   if (!state.currentUser) {
-    setStatus("Login to load map data");
+    setStatus(t("status_login_required"));
     renderTimelineOverview();
     return;
   }
 
-  setStatus("Loading protected map data...");
+  setStatus(t("status_loading"));
   await ensurePrototypeDataLoaded();
 
   const spoorData = getPrototypeData("SPOOR_DATA");
@@ -2306,7 +2306,7 @@ export async function initMap() {
   wireTimelineUi();
   renderTimelineOverview();
 
-  setStatus("Initializing map...");
+  setStatus(t("status_loading"));
 
   const nlBounds = L.latLngBounds(
     [50.7, 3.1],
@@ -2329,7 +2329,8 @@ export async function initMap() {
   L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
     attribution: "&copy; OpenStreetMap &copy; CARTO",
     maxZoom: MAP_MAX_ZOOM,
-    noWrap: true
+    noWrap: true,
+    className: "gvb-basemap-tile"
   }).addTo(state.map);
 
   await buildPrototypeLayers();
@@ -2359,5 +2360,5 @@ export async function initMap() {
 
   applyRouteSelectionFromUrl();
   await loadTimelineOverview();
-  setStatus("Ready");
+  setStatus(t("status_ready"));
 }
