@@ -46,6 +46,8 @@ Safe to rebuild if needed:
 - Rollback to `APP_DB_BACKEND=sqlite` works, but PostgreSQL-only data will not appear in SQLite unless copied back.
 - Before EC2 cutover, run a final migration from SQLite to PostgreSQL.
 - After WIOR refresh, the PostGIS mirror must be synced. The Phase 9C combined job handles this.
+- For production EC2 behind HTTPS, set `SESSION_COOKIE_SECURE=true` so browser session cookies are marked secure.
+- Keep `SESSION_COOKIE_SECURE=false` for local HTTP testing through `127.0.0.1` or an SSH tunnel.
 - Do not expose PostgreSQL port `5432` publicly.
 - Keep PostgreSQL local to EC2 for now.
 - Use an SSH tunnel and DBeaver or `psql` if remote DB inspection is needed.

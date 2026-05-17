@@ -132,7 +132,7 @@ if not SESSION_SECRET:
         "Add it to your .env file or set it in your environment before starting the server."
     )
 
-SESSION_HTTPS_ONLY = _env_flag("SESSION_HTTPS_ONLY", default=False)
+SESSION_COOKIE_SECURE = _env_flag("SESSION_COOKIE_SECURE", default=False)
 BOOTSTRAP_RESET_EXISTING_USERS = _env_flag("BOOTSTRAP_RESET_EXISTING_USERS", default=False)
 WIOR_AUTO_REFRESH_ENABLED = _env_flag("WIOR_AUTO_REFRESH_ENABLED", default=True)
 
@@ -140,7 +140,7 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
     same_site="lax",
-    https_only=SESSION_HTTPS_ONLY,
+    https_only=SESSION_COOKIE_SECURE,
     max_age=60 * 60 * 4,
 )
 
